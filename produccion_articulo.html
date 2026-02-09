@@ -1,0 +1,1525 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Producción por Artículo - Control de Calidad</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React y Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- ExcelJS para Excel con mejor soporte de estilos -->
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+    
+    <!-- Librería para leer Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- PapaParse para parseo rápido de CSV -->
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
+    
+    <!-- Chart.js para gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <style>
+        body { font-family: Arial, sans-serif; }
+        
+        /* Ocultar spinners en inputs number */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+            appearance: textfield;
+        }
+
+        /* Estilos para botones de filtro */
+        .filter-btn {
+            transition: all 0.2s ease;
+        }
+        .filter-btn:hover {
+            transform: translateY(-1px);
+        }
+        .filter-btn.active {
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+        }
+
+        @media print {
+            @page { size: portrait; margin: 1.5cm; }
+            * {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            body { 
+                background: white; 
+                -webkit-print-color-adjust: exact; 
+                print-color-adjust: exact;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            #root {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            .print\:hidden { display: none !important; }
+            table { width: 100% !important; border-collapse: collapse; page-break-inside: avoid; }
+            thead { display: table-header-group; }
+            tfoot { display: table-footer-group; }
+            tr { page-break-inside: avoid; }
+            th, td { padding: 3px 4px !important; font-size: 9px !important; }
+            header { page-break-after: avoid; }
+            .max-h-screen { max-height: none !important; height: auto !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="root"></div>
+
+    <!-- Botón flotante volver al menú principal -->
+    <a href="index.html" title="Volver al menú principal" style="position:fixed;right:18px;top:18px;width:50px;height:50px;border-radius:50%;background:#001a54;color:#fff;display:flex;align-items:center;justify-content:center;z-index:1100;box-shadow:0 6px 20px rgba(0,0,0,.18);text-decoration:none;font-size:22px;transition:background .2s" onmouseover="this.style.background='#1a3a7a'" onmouseout="this.style.background='#001a54'">&#8592;</a>
+
+    <!-- Modal de carga -->
+    <div id="loading-modal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4 text-center">
+            <div id="modal-spinner" class="mb-4 relative">
+                <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600"></div>
+                <div id="modal-timer" class="absolute inset-0 flex items-center justify-center">
+                    <span class="text-sm font-bold text-blue-600">--</span>
+                </div>
+            </div>
+            <h3 id="modal-title" class="text-lg font-semibold text-gray-800 mb-1">Cargando...</h3>
+            <p id="modal-message" class="text-gray-500 text-sm mb-3">Por favor espere</p>
+            <div class="bg-gray-100 rounded-lg p-2 mb-3">
+                <p id="modal-status" class="text-xs text-gray-500">Procesando...</p>
+            </div>
+            <p id="modal-time-remaining" class="text-xs text-gray-400 mb-3 hidden">Tiempo estimado: <span id="time-text">--</span></p>
+            <button id="modal-close-btn" onclick="document.getElementById('loading-modal').classList.add('hidden'); document.getElementById('modal-spinner').classList.remove('hidden'); document.getElementById('modal-close-btn').classList.add('hidden'); stopModalTimer();" class="hidden bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm">
+                Cerrar
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let modalTimerInterval = null;
+        let modalTimeRemaining = 0;
+
+        function startModalTimer(estimatedSeconds) {
+            stopModalTimer();
+            modalTimeRemaining = estimatedSeconds;
+            const timerEl = document.getElementById('modal-timer').querySelector('span');
+            const timeRemainingEl = document.getElementById('modal-time-remaining');
+            const timeTextEl = document.getElementById('time-text');
+            timeRemainingEl.classList.remove('hidden');
+            const updateDisplay = () => {
+                if (modalTimeRemaining > 0) {
+                    timerEl.textContent = modalTimeRemaining + 's';
+                    timeTextEl.textContent = modalTimeRemaining + ' segundos';
+                } else {
+                    timerEl.textContent = '...';
+                    timeTextEl.textContent = 'finalizando...';
+                }
+            };
+            updateDisplay();
+            modalTimerInterval = setInterval(() => {
+                modalTimeRemaining--;
+                updateDisplay();
+                if (modalTimeRemaining < -30) timeTextEl.textContent = 'tomando más de lo esperado...';
+            }, 1000);
+        }
+
+        function stopModalTimer() {
+            if (modalTimerInterval) { clearInterval(modalTimerInterval); modalTimerInterval = null; }
+            const timerEl = document.getElementById('modal-timer');
+            if (timerEl) timerEl.querySelector('span').textContent = '✓';
+            const timeRemainingEl = document.getElementById('modal-time-remaining');
+            if (timeRemainingEl) timeRemainingEl.classList.add('hidden');
+        }
+
+        function resetModalTimer() {
+            stopModalTimer();
+            const timerEl = document.getElementById('modal-timer');
+            if (timerEl) timerEl.querySelector('span').textContent = '--';
+        }
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        // ============================================
+        // CONFIGURACIÓN - URL DE APPS SCRIPT
+        // ============================================
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_sS4m7Mll4uwpiMHImgvDKtZACt6J653r2fgeUFNSr1q0REGhncQeEW9nYUbrJeJo/exec";
+        // ============================================
+
+        // ============================================
+        // CONFIGURACIÓN - CARGA RÁPIDA JSONP (Google Sheets público)
+        // Descomentar y configurar para habilitar carga rápida
+        // ============================================
+        const SHEET_ID = "1NVfMymJadfFuV5ROJB9ZamsCkXjM6hVRAz_Yku1ce_w"; // ID del Google Sheet (ej: "1NywhboH-QcezeVyBgnd3U8kG6fL1I3CqN0kFkOE6h1M")
+        const SHEET_NAME = "base"; // Nombre de la hoja
+        // ============================================
+
+        // --- FUNCIONES DE CARGA RÁPIDA JSONP ---
+        const gvizToObjects = (resp) => {
+            if (!resp || !resp.table) return [];
+            const cols = (resp.table.cols || []).map(c => String(c.label || c.id || "").trim());
+            return (resp.table.rows || []).map(r => {
+                const o = {};
+                cols.forEach((h, i) => {
+                    const cell = r.c && r.c[i];
+                    o[h] = cell && (cell.v !== null && cell.v !== undefined) ? cell.v : "";
+                });
+                return o;
+            });
+        };
+
+        const loadSheetJSONP = (sheetId, sheetName) => {
+            const TIMEOUT_MS = 15000;
+            return new Promise((resolve, reject) => {
+                const cbName = "GVIZ_CB_" + Math.random().toString(36).slice(2);
+                let script = document.createElement("script");
+                let timer = null;
+
+                function cleanup() {
+                    if (timer) clearTimeout(timer);
+                    if (script && script.parentNode) script.parentNode.removeChild(script);
+                    if (window[cbName]) delete window[cbName];
+                }
+
+                timer = setTimeout(() => {
+                    cleanup();
+                    reject(new Error(`Tiempo de espera agotado al cargar "${sheetName}".`));
+                }, TIMEOUT_MS);
+
+                window[cbName] = function(resp) {
+                    cleanup();
+                    if (resp && resp.status === "error") {
+                        reject(new Error(resp.errors?.[0]?.detailed_message || "Error al cargar datos."));
+                    } else {
+                        resolve(gvizToObjects(resp));
+                    }
+                };
+
+                const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq`;
+                const url = `${base}?sheet=${encodeURIComponent(sheetName)}&headers=2&tq=${encodeURIComponent("select *")}&tqx=out:json;responseHandler:${cbName}&nocache=${Date.now()}`;
+
+                script.src = url;
+                document.head.appendChild(script);
+            });
+        };
+
+        // ============================================
+        // CACHÉ LOCAL CON SESSIONSTORAGE (persistente entre páginas)
+        // ============================================
+        class LocalCache {
+            constructor(duration = 600000) {
+                this.duration = duration;
+                this.storageKey = 'calidad_textil_cache';
+            }
+            
+            _getStorage() {
+                try {
+                    const stored = sessionStorage.getItem(this.storageKey);
+                    return stored ? JSON.parse(stored) : {};
+                } catch (e) {
+                    return {};
+                }
+            }
+            
+            _setStorage(data) {
+                try {
+                    sessionStorage.setItem(this.storageKey, JSON.stringify(data));
+                } catch (e) {
+                    // Si sessionStorage está lleno, limpiar y reintentar
+                    sessionStorage.clear();
+                    try {
+                        sessionStorage.setItem(this.storageKey, JSON.stringify(data));
+                    } catch (e2) {
+                        console.warn('No se pudo guardar en sessionStorage');
+                    }
+                }
+            }
+            
+            get(key) {
+                const storage = this._getStorage();
+                const item = storage[key];
+                if (!item) return null;
+                
+                if (Date.now() - item.timestamp > this.duration) {
+                    delete storage[key];
+                    this._setStorage(storage);
+                    return null;
+                }
+                
+                return item.data;
+            }
+            
+            set(key, data) {
+                const storage = this._getStorage();
+                storage[key] = {
+                    data: data,
+                    timestamp: Date.now()
+                };
+                this._setStorage(storage);
+            }
+            
+            clear() {
+                sessionStorage.removeItem(this.storageKey);
+            }
+            
+            clearPattern(pattern) {
+                const storage = this._getStorage();
+                let changed = false;
+                for (const key of Object.keys(storage)) {
+                    if (key.includes(pattern)) {
+                        delete storage[key];
+                        changed = true;
+                    }
+                }
+                if (changed) this._setStorage(storage);
+            }
+        }
+        
+        const clientCache = new LocalCache(600000); // 10 minutos
+
+        // --- COLUMNAS DE DEFECTOS ---
+        const DEFECT_COLUMNS = [
+            "Rotura De Aguja", "Quebradura en el Doblez", "Jaladuras", "Qebraduras", "Polipropileno",
+            "Parada De Maquina", "Marca De Doblez", "Malla Rota", "Malla Retinada",
+            "Malla Caida/Fuga", "Lineas Verticales De Aguja", "Lineas De Aceite",
+            "Hueco Con Cordon", "Hilo Tensionado", "Hilo Sucio",
+            "Hilo Jaspeado", "Hilo Irregular", "Hilo Doble", "Falla De Raport", "Hilo Barrado",
+            "Gotas Aceite Dispersas", "Falla De Lycra a lo Ancho", "Falla De Lycra",
+            "Escapes De Lycra", "Empalme2", "Empalme", "Cordon",
+            "Contaminación De Hilado", "Cont. Por Ambiente", "Cascarillas",
+            "Caida De Tela", "Anillado"
+        ];
+
+        // --- FUNCIONES DEL MODAL (con retardo de 5s) ---
+        let modalShowTimeout = null;
+        let modalPendingConfig = null;
+
+        const _actuallyShowModal = () => {
+            if (!modalPendingConfig) return;
+            const { title, message, status, estimatedSeconds } = modalPendingConfig;
+            resetModalTimer();
+            document.getElementById('modal-spinner').classList.remove('hidden');
+            document.getElementById('modal-close-btn').classList.add('hidden');
+            document.getElementById('modal-title').textContent = title || 'Cargando...';
+            document.getElementById('modal-message').textContent = message || 'Por favor espere';
+            document.getElementById('modal-status').textContent = status || 'Procesando...';
+            document.getElementById('loading-modal').classList.remove('hidden');
+            if (estimatedSeconds > 0) {
+                startModalTimer(estimatedSeconds);
+            }
+        };
+
+        const showLoadingModal = (title, message, status, estimatedSeconds = 0) => {
+            if (modalShowTimeout) { clearTimeout(modalShowTimeout); modalShowTimeout = null; }
+            modalPendingConfig = { title, message, status, estimatedSeconds };
+            modalShowTimeout = setTimeout(_actuallyShowModal, 5000);
+        };
+
+        const updateModalStatus = (status) => {
+            if (modalPendingConfig) modalPendingConfig.status = status;
+            if (!document.getElementById('loading-modal').classList.contains('hidden')) {
+                document.getElementById('modal-status').textContent = status;
+            }
+        };
+
+        const hideLoadingModal = () => {
+            if (modalShowTimeout) { clearTimeout(modalShowTimeout); modalShowTimeout = null; }
+            modalPendingConfig = null;
+            stopModalTimer();
+            document.getElementById('loading-modal').classList.add('hidden');
+        };
+
+        const showModalError = (message, details) => {
+            if (modalShowTimeout) { clearTimeout(modalShowTimeout); modalShowTimeout = null; }
+            modalPendingConfig = null;
+            stopModalTimer();
+            document.getElementById('modal-spinner').classList.add('hidden');
+            document.getElementById('modal-title').textContent = '❌ Error';
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal-status').textContent = details || 'Intente nuevamente';
+            document.getElementById('modal-close-btn').classList.remove('hidden');
+            document.getElementById('loading-modal').classList.remove('hidden');
+        };
+
+        const showModalSuccess = (message, details) => {
+            if (modalShowTimeout) { clearTimeout(modalShowTimeout); modalShowTimeout = null; }
+            modalPendingConfig = null;
+            stopModalTimer();
+            if (!document.getElementById('loading-modal').classList.contains('hidden')) {
+                document.getElementById('modal-title').textContent = '✅ ¡Completado!';
+                document.getElementById('modal-message').textContent = message;
+                document.getElementById('modal-status').textContent = details;
+                setTimeout(hideLoadingModal, 3000);
+            }
+        };
+
+        // --- FUNCIONES DE UTILIDAD ---
+        const formatDateForInput = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        // Función para calcular fechas dinámicas basadas en los datos
+        const calculateDateRangeFromData = (allData) => {
+            let maxDate = null;
+            
+            allData.forEach(row => {
+                const rawDateStr = row['Día'] || row['Dia'] || row['Day'] || row['Fecha'] || '';
+                const rowDate = parseSheetDate(rawDateStr);
+                if (rowDate) {
+                    const dateNum = rowDate.year * 10000 + (rowDate.month + 1) * 100 + rowDate.day;
+                    if (!maxDate || dateNum > maxDate.num) {
+                        maxDate = { ...rowDate, num: dateNum };
+                    }
+                }
+            });
+            
+            if (!maxDate) {
+                // Fallback si no hay datos
+                const today = new Date();
+                const weekAgo = new Date(today);
+                weekAgo.setDate(weekAgo.getDate() - 5);
+                return {
+                    endDate: formatDateForInput(today),
+                    startDate: formatDateForInput(weekAgo)
+                };
+            }
+            
+            // Última fecha encontrada
+            const endDateObj = new Date(maxDate.year, maxDate.month, maxDate.day);
+            // 5 días antes
+            const startDateObj = new Date(endDateObj);
+            startDateObj.setDate(startDateObj.getDate() - 5);
+            
+            return {
+                endDate: formatDateForInput(endDateObj),
+                startDate: formatDateForInput(startDateObj)
+            };
+        };
+
+        // Parsear fecha del sheet (formato: dd/mmm/yyyy o variantes)
+        // Retorna un objeto {year, month, day} para comparaciones sin problemas de timezone
+        const parseSheetDate = (dateStr) => {
+            if (!dateStr) return null;
+            
+            const mesesMap = {
+                'ene': 0, 'enero': 0, 'feb': 1, 'febrero': 1, 'mar': 2, 'marzo': 2,
+                'abr': 3, 'abril': 3, 'may': 4, 'mayo': 4, 'jun': 5, 'junio': 5,
+                'jul': 6, 'julio': 6, 'ago': 7, 'agosto': 7, 'sep': 8, 'sept': 8, 'septiembre': 8,
+                'oct': 9, 'octubre': 9, 'nov': 10, 'noviembre': 10, 'dic': 11, 'diciembre': 11
+            };
+            
+            const str = String(dateStr).trim().toLowerCase();
+            
+            // Formato dd/mmm/yyyy (ej: 25/jul/2025)
+            const match = str.match(/(\d{1,2})\/([a-z]{3,})\/(\d{4})/);
+            if (match) {
+                const day = parseInt(match[1]);
+                const monthStr = match[2].substring(0, 3); // Tomar primeros 3 caracteres
+                const month = mesesMap[monthStr];
+                const year = parseInt(match[3]);
+                if (month !== undefined && !isNaN(day) && !isNaN(year)) {
+                    return { year, month, day, asDate: new Date(year, month, day) };
+                }
+            }
+            
+            // Formato ISO: 2025-07-25T00:00:00.000Z o similar
+            const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (isoMatch) {
+                const year = parseInt(isoMatch[1]);
+                const month = parseInt(isoMatch[2]) - 1; // Meses 0-indexed
+                const day = parseInt(isoMatch[3]);
+                return { year, month, day, asDate: new Date(year, month, day) };
+            }
+            
+            // Formato dd/mm/yyyy (numérico)
+            const numericMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (numericMatch) {
+                const day = parseInt(numericMatch[1]);
+                const month = parseInt(numericMatch[2]) - 1;
+                const year = parseInt(numericMatch[3]);
+                return { year, month, day, asDate: new Date(year, month, day) };
+            }
+            
+            // Intentar parse directo como último recurso
+            const parsed = new Date(dateStr);
+            if (!isNaN(parsed.getTime())) {
+                return { 
+                    year: parsed.getFullYear(), 
+                    month: parsed.getMonth(), 
+                    day: parsed.getDate(),
+                    asDate: parsed 
+                };
+            }
+            
+            return null;
+        };
+        
+        // Comparar fechas de forma segura sin problemas de timezone
+        const compareDates = (dateObj, startStr, endStr) => {
+            if (!dateObj) return false;
+            
+            // Parsear las fechas de entrada (formato ISO yyyy-MM-dd)
+            const [startYear, startMonth, startDay] = startStr.split('-').map(Number);
+            const [endYear, endMonth, endDay] = endStr.split('-').map(Number);
+            
+            // Construir números para comparación YYYYMMDD
+            const dateNum = dateObj.year * 10000 + (dateObj.month + 1) * 100 + dateObj.day;
+            const startNum = startYear * 10000 + startMonth * 100 + startDay;
+            const endNum = endYear * 10000 + endMonth * 100 + endDay;
+            
+            return dateNum >= startNum && dateNum <= endNum;
+        };
+
+        // --- FUNCIÓN PARA OBTENER DATOS POR RANGO DE FECHAS (OPTIMIZADA) ---
+        const fetchDataByDateRange = async (startDate, endDate, opFilter = null) => {
+            if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("PEGAR_AQUI")) {
+                return null;
+            }
+
+            // Verificar caché local primero
+            const cacheKey = `daterange_${startDate}_${endDate}_${opFilter || 'all'}`;
+            const cached = clientCache.get(cacheKey);
+            if (cached) {
+                updateModalStatus(`✓ ${cached.length} registro(s) cargado(s) desde caché local`);
+                return cached;
+            }
+
+            try {
+                let url = `${APPS_SCRIPT_URL}?action=getDataByDateRange&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`;
+                if (opFilter) {
+                    url += `&op=${encodeURIComponent(opFilter)}`;
+                }
+                console.log('fetchDataByDateRange url=', url);
+                
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 60000);
+
+                updateModalStatus('Consultando servidor...');
+                const response = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeout);
+                
+                console.log('fetchDataByDateRange response.ok=', response.ok, 'status=', response.status);
+
+                const text = await response.text();
+                let result = null;
+                try {
+                    result = JSON.parse(text);
+                } catch (err) {
+                    console.log('fetchDataByDateRange - respuesta no JSON:', text.slice(0, 1000));
+                }
+
+                if (result && result.success && result.data) {
+                    console.log(`Servidor devolvió ${result.data.length} registros filtrados`);
+                    clientCache.set(cacheKey, result.data);
+                    return result.data;
+                }
+                console.log('fetchDataByDateRange - no se recibió data válida', result);
+            } catch (error) {
+                console.log("Error obteniendo datos (getDataByDateRange):", error);
+                if (error.name === 'AbortError') {
+                    updateModalStatus('Tiempo de espera agotado. Intentando método alternativo...');
+                }
+            }
+            return null;
+        };
+
+        // --- FUNCIÓN PARA OBTENER TODOS LOS DATOS (FALLBACK) ---
+        const fetchAllData = async () => {
+            if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("PEGAR_AQUI")) {
+                return null;
+            }
+
+            // Verificar caché local primero (pero ignorar si tiene 0 registros)
+            const cacheKey = 'all_data';
+            const cached = clientCache.get(cacheKey);
+            if (cached && cached.length > 0) {
+                updateModalStatus(`✓ ${cached.length} registro(s) cargado(s) desde caché local`);
+                return cached;
+            } else if (cached && cached.length === 0) {
+                console.log('[Cache] ⚠ Caché vacío en fetchAllData, limpiando...');
+                clientCache.clear();
+            }
+
+            try {
+                const url = `${APPS_SCRIPT_URL}?action=getAllData`;
+                console.log('fetchAllData url=', url);
+                
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 90000);
+
+                updateModalStatus('Descargando todos los datos...');
+                const response = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeout);
+                
+                console.log('fetchAllData response.ok=', response.ok, 'status=', response.status);
+
+                const text = await response.text();
+                console.log('fetchAllData - tamaño respuesta:', text.length, 'bytes');
+                
+                let result = null;
+                try {
+                    result = JSON.parse(text);
+                } catch (err) {
+                    console.log('fetchAllData - respuesta no JSON:', text.slice(0, 1000));
+                }
+
+                if (result && result.success && result.data && Array.isArray(result.data)) {
+                    console.log(`Servidor devolvió ${result.data.length} registros totales`);
+                    // Solo guardar en caché si hay datos válidos
+                    if (result.data.length > 0) {
+                        clientCache.set(cacheKey, result.data);
+                    } else {
+                        console.log('[Cache] ⚠ No guardando en caché porque hay 0 registros');
+                    }
+                    return result.data;
+                }
+                // Mostrar más detalles del error
+                if (result && !result.success) {
+                    console.log('fetchAllData - error del servidor:', result.error || result.message || 'Error desconocido');
+                }
+                console.log('fetchAllData - no se recibió data válida', result);
+            } catch (error) {
+                console.log("Error obteniendo todos los datos (getAllData):", error);
+            }
+            return null;
+        };
+
+        // Función para cargar CSV directamente desde Google Sheets (fallback rápido)
+        const loadSheetCSV = async (sheetId, sheetName) => {
+            const urls = [
+                `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`,
+                `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&sheet=${encodeURIComponent(sheetName)}`
+            ];
+            
+            for (const url of urls) {
+                try {
+                    console.log('[CSV] Intentando:', url);
+                    const response = await fetch(url);
+                    if (!response.ok) continue;
+                    const text = await response.text();
+                    if (text && text.length > 0 && typeof Papa !== 'undefined') {
+                        // Remover la primera línea (fila 1 con datos basura) antes de parsear
+                        const lines = text.split('\n');
+                        const textWithoutFirstRow = lines.slice(1).join('\n');
+                        const parsed = Papa.parse(textWithoutFirstRow, { header: true, skipEmptyLines: true });
+                        if (parsed.data && parsed.data.length > 0) {
+                            console.log(`[CSV] ✓ Parseados ${parsed.data.length} registros`);
+                            return parsed.data;
+                        }
+                    }
+                } catch (err) {
+                    console.log('[CSV] Error:', err.message);
+                }
+            }
+            return null;
+        };
+
+        // Función que intenta múltiples métodos de carga (JSONP → CSV → Apps Script)
+        const loadSheetDataFast = async () => {
+            // Si hay SHEET_ID configurado, intentar métodos rápidos primero
+            if (SHEET_ID && SHEET_ID.length > 10) {
+                // 1. Intentar JSONP (más rápido)
+                try {
+                    updateModalStatus('Cargando datos (JSONP)...');
+                    console.log('[JSONP] Intentando carga rápida...');
+                    const data = await loadSheetJSONP(SHEET_ID, SHEET_NAME);
+                    if (data && data.length > 0) {
+                        console.log(`[JSONP] ✓ Cargados ${data.length} registros`);
+                        clientCache.set('all_data', data);
+                        return data;
+                    } else {
+                        console.log('[JSONP] ⚠ No se recibieron datos, NO guardando en caché');
+                    }
+                } catch (err) {
+                    console.log('[JSONP] Falló:', err.message);
+                }
+                
+                // 2. Intentar CSV (fallback rápido)
+                try {
+                    updateModalStatus('Cargando datos (CSV)...');
+                    const data = await loadSheetCSV(SHEET_ID, SHEET_NAME);
+                    if (data && data.length > 0) {
+                        clientCache.set('all_data', data);
+                        return data;
+                    }
+                } catch (err) {
+                    console.log('[CSV] Falló:', err.message);
+                }
+            }
+            // 3. Fallback final a Apps Script
+            updateModalStatus('Cargando datos (servidor)...');
+            return await fetchAllData();
+        };
+
+        // --- ICONO SVG PARA CARGAR EXCEL ---
+        const IconUpload = () => (<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>);
+
+        // --- FUNCIÓN PARA SINCRONIZAR CON GOOGLE SHEETS ---
+        const syncWithGoogleSheet = async (rows) => {
+            if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("PEGAR_AQUI")) {
+                throw new Error("Configure la URL de Apps Script en el código");
+            }
+
+            const response = await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ rows: rows })
+            });
+
+            return { success: true, message: "Datos enviados al servidor" };
+        };
+
+        // ============================================
+        // COMPONENTE PRINCIPAL
+        // ============================================
+        function App() {
+            // Estado de filtros principales
+            const [filterType, setFilterType] = useState('fechas'); // 'fechas' o 'op'
+            const [startDate, setStartDate] = useState('');
+            const [endDate, setEndDate] = useState('');
+            const [opInput, setOpInput] = useState('');
+            
+            // Estado de datos
+            const [rawData, setRawData] = useState([]);
+            const [allDataCache, setAllDataCache] = useState([]); // Cache de todos los datos
+            const [isLoading, setIsLoading] = useState(false);
+            const [dataLoaded, setDataLoaded] = useState(false);
+
+            // Calcular producción por artículo
+            const productionByArticle = useMemo(() => {
+                const result = {};
+                
+                // Obtener todas las columnas que podrían ser defectos (una sola vez)
+                const defectColumnMap = {};
+                if (rawData.length > 0) {
+                    const sampleRow = rawData[0];
+                    const allColumns = Object.keys(sampleRow);
+                    
+                    DEFECT_COLUMNS.forEach(defectName => {
+                        // Buscar columna exacta o que contenga el nombre del defecto
+                        const matchingCol = allColumns.find(col => {
+                            const colLower = col.toLowerCase().trim();
+                            const defectLower = defectName.toLowerCase().trim();
+                            return colLower === defectLower || colLower.includes(defectLower) || colLower.endsWith(defectLower);
+                        });
+                        if (matchingCol) {
+                            defectColumnMap[defectName] = matchingCol;
+                        }
+                    });
+                }
+                
+                rawData.forEach(row => {
+                    const codArt = String(row['Cod. Art.'] || row['Cod Art'] || row['CodArt'] || row['Codigo'] || '').trim();
+                    const descripcion = String(row['Descripción'] || row['Descripcion'] || row['Description'] || '').trim();
+                    const proveedorHilo = String(row['Proveedor de Hilo'] || row['Proveedor Hilo'] || row['ProveedorHilo'] || '').trim();
+                    const proveedorSpandex = String(row['Proveedor Spandex'] || row['ProveedorSpandex'] || row['Proveedor de Spandex'] || '').trim();
+                    
+                    if (!codArt) return;
+                    
+                    if (!result[codArt]) {
+                        result[codArt] = {
+                            codArt: codArt,
+                            descripcion: descripcion,
+                            proveedorHilo: proveedorHilo,
+                            proveedorSpandex: proveedorSpandex,
+                            total: 0,
+                            defects: {}
+                        };
+                        DEFECT_COLUMNS.forEach(def => result[codArt].defects[def] = 0);
+                    }
+                    
+                    // Sumar cantidad (puede ser 'Cantidad', 'Total', 'Rollos', etc.)
+                    const cantidad = parseInt(row['Cantidad'] || row['Total'] || row['Rollos'] || row['Kg'] || 1) || 1;
+                    result[codArt].total += cantidad;
+                    
+                    // Sumar defectos usando el mapeo de columnas
+                    DEFECT_COLUMNS.forEach(defect => {
+                        const actualCol = defectColumnMap[defect] || defect;
+                        const count = parseInt(row[actualCol]) || 0;
+                        if (count > 0) {
+                            result[codArt].defects[defect] += count;
+                        }
+                    });
+                    
+                    // Actualizar descripción si estaba vacía
+                    if (!result[codArt].descripcion && descripcion) {
+                        result[codArt].descripcion = descripcion;
+                    }
+                    // Actualizar proveedores si estaban vacíos
+                    if (!result[codArt].proveedorHilo && proveedorHilo) {
+                        result[codArt].proveedorHilo = proveedorHilo;
+                    }
+                    if (!result[codArt].proveedorSpandex && proveedorSpandex) {
+                        result[codArt].proveedorSpandex = proveedorSpandex;
+                    }
+                });
+                
+                // Calcular los 2 principales defectos para cada artículo
+                Object.values(result).forEach(article => {
+                    const sortedDefects = Object.entries(article.defects)
+                        .filter(([_, count]) => count > 0)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 2);
+                    article.topDefects = sortedDefects;
+                });
+                
+                return result;
+            }, [rawData]);
+
+            // Convertir a array ordenado por total descendente
+            const sortedArticles = useMemo(() => {
+                return Object.values(productionByArticle)
+                    .sort((a, b) => b.total - a.total);
+            }, [productionByArticle]);
+
+            // Calcular total general
+            const grandTotal = useMemo(() => {
+                return sortedArticles.reduce((sum, article) => sum + article.total, 0);
+            }, [sortedArticles]);
+
+            // --- FUNCIÓN PARA CARGAR ARCHIVO EXCEL ---
+            const handleFileUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                e.target.value = '';
+
+                showLoadingModal(
+                    'Cargando archivo...',
+                    'Leyendo datos del Excel',
+                    `Archivo: ${file.name}`,
+                    5
+                );
+
+                const reader = new FileReader();
+                reader.onload = async (evt) => {
+                    try {
+                        updateModalStatus('Procesando archivo Excel...');
+                        
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: 'binary' });
+                        const wsname = wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        
+                        const rawExcelData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                        
+                        let headerRowIndex = 1;
+                        for (let i = 0; i < Math.min(rawExcelData.length, 10); i++) {
+                            const rowStr = JSON.stringify(rawExcelData[i]).toUpperCase();
+                            if (rowStr.includes("OP") && (rowStr.includes("PARTIDA") || rowStr.includes("ROLLO"))) {
+                                headerRowIndex = i;
+                                break;
+                            }
+                        }
+
+                        const jsonDataRaw = XLSX.utils.sheet_to_json(ws, { range: headerRowIndex, defval: "" });
+                        
+                        // Obtener el nombre de la columna AA (índice 26) para filtrar filas con "TOTAL"
+                        const headers = rawExcelData[headerRowIndex] || [];
+                        const colAAName = headers[26]; // Columna AA es índice 26
+                        
+                        // Filtrar filas que contengan "TOTAL" en la columna AA
+                        const jsonData = jsonDataRaw.filter(row => {
+                            const cellValue = colAAName ? String(row[colAAName] || '').toUpperCase().trim() : '';
+                            return cellValue !== 'TOTAL';
+                        });
+                        
+                        if (jsonData.length === 0) {
+                            document.getElementById('modal-title').textContent = '❌ Error';
+                            document.getElementById('modal-message').textContent = 'No se encontraron datos válidos';
+                            document.getElementById('modal-status').textContent = 'El archivo no contiene datos o el formato es incorrecto';
+                            setTimeout(hideLoadingModal, 4000);
+                            return;
+                        }
+
+                        updateModalStatus(`${jsonData.length} filas encontradas. Sincronizando con la base de datos...`);
+
+                        try {
+                            await syncWithGoogleSheet(jsonData);
+                            clientCache.clear();
+                            
+                            document.getElementById('modal-title').textContent = '✅ ¡Completado!';
+                            document.getElementById('modal-message').textContent = `Se procesaron ${jsonData.length} filas correctamente`;
+                            document.getElementById('modal-status').textContent = 'Los datos han sido sincronizados con la base de datos. Presione Buscar para ver los cambios.';
+                            setTimeout(hideLoadingModal, 3000);
+                        } catch (syncError) {
+                            console.error('Error de sincronización:', syncError);
+                            document.getElementById('modal-title').textContent = '❌ Error';
+                            document.getElementById('modal-message').textContent = 'Error al sincronizar con la base de datos';
+                            document.getElementById('modal-status').textContent = syncError.message || 'Intente nuevamente';
+                            setTimeout(hideLoadingModal, 4000);
+                        }
+                        
+                    } catch (error) {
+                        console.error(error);
+                        document.getElementById('modal-title').textContent = '❌ Error';
+                        document.getElementById('modal-message').textContent = 'Error al leer el archivo';
+                        document.getElementById('modal-status').textContent = error.message || 'Formato de archivo no válido';
+                        setTimeout(hideLoadingModal, 4000);
+                    }
+                };
+                
+                reader.onerror = () => {
+                    document.getElementById('modal-title').textContent = '❌ Error';
+                    document.getElementById('modal-message').textContent = 'Error al leer el archivo';
+                    document.getElementById('modal-status').textContent = 'No se pudo leer el archivo seleccionado';
+                    setTimeout(hideLoadingModal, 4000);
+                };
+                
+                reader.readAsBinaryString(file);
+            };
+
+            // Cargar datos iniciales al montar el componente
+            const loadInitialData = useCallback(async () => {
+                if (dataLoaded) return;
+                
+                setIsLoading(true);
+                showLoadingModal('Cargando datos...', 'Obteniendo información del servidor', 'Conectando...', 15);
+
+                try {
+                    console.log('loadInitialData - Iniciando carga de datos...');
+                    const allData = await loadSheetDataFast();
+                    console.log('loadInitialData - Datos recibidos:', allData ? allData.length : 'null');
+                    
+                    if (allData && allData.length > 0) {
+                        setAllDataCache(allData);
+                        
+                        // Debug: mostrar columnas disponibles
+                        console.log('loadInitialData - Columnas disponibles:', Object.keys(allData[0]));
+                        console.log('loadInitialData - Primera fila:', allData[0]);
+                        
+                        // Calcular fechas dinámicas basadas en los datos
+                        const { startDate: calcStart, endDate: calcEnd } = calculateDateRangeFromData(allData);
+                        console.log('loadInitialData - Rango calculado:', calcStart, 'a', calcEnd);
+                        setStartDate(calcStart);
+                        setEndDate(calcEnd);
+                        
+                        // Filtrar por las fechas calculadas
+                        const filteredByDate = allData.filter(row => {
+                            const rawDateStr = row['Día'] || row['Dia'] || row['Day'] || row['Fecha'] || '';
+                            const rowDate = parseSheetDate(rawDateStr);
+                            if (!rowDate) return false;
+                            return compareDates(rowDate, calcStart, calcEnd);
+                        });
+                        
+                        console.log('loadInitialData - Registros filtrados:', filteredByDate.length);
+                        
+                        // Si no hay datos filtrados, mostrar TODOS los datos
+                        if (filteredByDate.length === 0) {
+                            console.log('loadInitialData - Sin datos en rango, mostrando todos los datos');
+                            setRawData(allData);
+                            setDataLoaded(true);
+                            updateModalStatus(`✓ ${allData.length} registros cargados (sin filtro de fechas)`);
+                        } else {
+                            setRawData(filteredByDate);
+                            setDataLoaded(true);
+                            updateModalStatus(`✓ ${filteredByDate.length} registros cargados (${calcStart} a ${calcEnd})`);
+                        }
+                    } else {
+                        console.log('loadInitialData - No se recibieron datos del servidor');
+                        updateModalStatus('No se encontraron datos en el servidor');
+                    }
+                } catch (error) {
+                    console.error('Error cargando datos:', error);
+                    updateModalStatus('Error al cargar datos: ' + error.message);
+                } finally {
+                    setTimeout(() => {
+                        setIsLoading(false);
+                        hideLoadingModal();
+                    }, 500);
+                }
+            }, [dataLoaded]);
+
+            // Cargar datos al montar el componente
+            useEffect(() => {
+                loadInitialData();
+            }, [loadInitialData]);
+
+            // Manejar búsqueda
+            const handleSearch = useCallback(async () => {
+                setIsLoading(true);
+                
+                showLoadingModal(
+                    'Consultando datos...',
+                    filterType === 'fechas' 
+                        ? `Buscando registros del ${startDate} al ${endDate}`
+                        : `Buscando registros de OP ${opInput}`,
+                    'Conectando con la base de datos...',
+                    15
+                );
+
+                try {
+                    let data = null;
+                    
+                    if (filterType === 'op' && opInput.length === 5) {
+                        // Buscar por OP
+                        updateModalStatus('Obteniendo datos de OP...');
+                        const url = `${APPS_SCRIPT_URL}?action=getDataByOP&op=${encodeURIComponent(opInput)}`;
+                        const response = await fetch(url);
+                        const result = await response.json();
+                        if (result.success && result.data) {
+                            data = result.data;
+                            updateModalStatus(`✓ ${data.length} registros encontrados para OP ${opInput}`);
+                        }
+                    } else {
+                        // Obtener todos los datos y filtrar localmente
+                        updateModalStatus('Descargando todos los datos...');
+                        console.log('SEARCH startDate=', startDate, 'endDate=', endDate);
+                        
+                        // Limpiar caché para forzar recarga fresca
+                        clientCache.clear();
+                        
+                        const allData = await loadSheetDataFast();
+                        
+                        if (allData && allData.length > 0) {
+                            console.log(`Total registros del servidor: ${allData.length}`);
+                            
+                            // Filtrar por fechas localmente
+                            updateModalStatus(`Filtrando ${allData.length} registros por fechas...`);
+                            data = allData.filter(row => {
+                                const rawDateStr = row['Día'] || row['Dia'] || row['Day'] || row['Fecha'] || '';
+                                const rowDate = parseSheetDate(rawDateStr);
+                                if (!rowDate) return false;
+                                return compareDates(rowDate, startDate, endDate);
+                            });
+                            
+                            console.log(`Registros filtrados: ${data.length}`);
+                        }
+                    }
+                    
+                    if (data && data.length > 0) {
+                        setRawData(data);
+                        updateModalStatus(`✓ ${data.length} registros encontrados`);
+                    } else {
+                        setRawData([]);
+                        updateModalStatus('No se encontraron registros para el rango especificado');
+                    }
+                } catch (error) {
+                    console.error('Error en búsqueda:', error);
+                    updateModalStatus('Error al consultar datos: ' + error.message);
+                } finally {
+                    setTimeout(() => {
+                        setIsLoading(false);
+                        hideLoadingModal();
+                    }, 1000);
+                }
+            }, [filterType, startDate, endDate, opInput]);
+
+            // Exportar a Excel con ExcelJS
+            const handleExportExcel = async () => {
+                try {
+                    if (!window.ExcelJS) {
+                        alert('La librería de Excel no se ha cargado. Por favor, recarga la página.');
+                        return;
+                    }
+                    
+                    const workbook = new window.ExcelJS.Workbook();
+                    const worksheet = workbook.addWorksheet("Producción por Artículo");
+                    
+                    // Agregar título
+                    const titleRow = worksheet.addRow(["CONTROL DE INSPECCIÓN DE CALIDAD T-CRUDO"]);
+                    titleRow.font = { bold: true, size: 14, name: 'Calibri' };
+                    
+                    // Agregar subtítulo
+                    const subtitleRow = worksheet.addRow(["Producción por Artículo"]);
+                    subtitleRow.font = { bold: true, size: 11, name: 'Calibri' };
+                    
+                    // Fila vacía
+                    worksheet.addRow([]);
+                    
+                    // Encabezados
+                    const headers = ["Nº", "Cod. Art.", "Descripción", "Total", "%Part"];
+                    const headerRow = worksheet.addRow(headers);
+                    headerRow.font = { bold: true, color: { argb: 'FF000000' } };
+                    headerRow.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FFD3D3D3' }
+                    };
+                    headerRow.alignment = { horizontal: 'center', vertical: 'center', wrapText: true };
+                    
+                    // Aplicar bordes al encabezado
+                    headerRow.eachCell(cell => {
+                        cell.border = {
+                            top: { style: 'thin' },
+                            left: { style: 'thin' },
+                            bottom: { style: 'thin' },
+                            right: { style: 'thin' }
+                        };
+                    });
+                    
+                    // Agregar datos
+                    sortedArticles.forEach((article, index) => {
+                        const percentage = grandTotal > 0 ? ((article.total / grandTotal) * 100).toFixed(1) : 0;
+                        const dataRow = worksheet.addRow([
+                            index + 1,
+                            article.codArt,
+                            article.descripcion,
+                            article.total,
+                            `${percentage}%`
+                        ]);
+                        
+                        // Alternar colores de filas
+                        if (index % 2 === 1) {
+                            dataRow.eachCell((cell) => {
+                                cell.fill = {
+                                    type: 'pattern',
+                                    pattern: 'solid',
+                                    fgColor: { argb: 'FFF2F2F2' }
+                                };
+                            });
+                        }
+                        
+                        // Aplicar bordes y alineación
+                        dataRow.eachCell((cell, colNumber) => {
+                            cell.border = {
+                                top: { style: 'thin' },
+                                left: { style: 'thin' },
+                                bottom: { style: 'thin' },
+                                right: { style: 'thin' }
+                            };
+                            
+                            if (colNumber <= 2) {
+                                cell.alignment = { horizontal: 'center', vertical: 'center' };
+                            } else if (colNumber === 3) {
+                                cell.alignment = { horizontal: 'left', vertical: 'center' };
+                            } else {
+                                cell.alignment = { horizontal: 'center', vertical: 'center' };
+                            }
+                        });
+                    });
+                    
+                    // Agregar fila de totales
+                    const footerRow = worksheet.addRow(['', '', 'TOTAL', grandTotal, '100%']);
+                    footerRow.font = { bold: true };
+                    footerRow.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FFD3D3D3' }
+                    };
+                    footerRow.alignment = { horizontal: 'center', vertical: 'center' };
+                    
+                    // Aplicar bordes a la fila de totales
+                    footerRow.eachCell(cell => {
+                        cell.border = {
+                            top: { style: 'thin' },
+                            left: { style: 'thin' },
+                            bottom: { style: 'thin' },
+                            right: { style: 'thin' }
+                        };
+                    });
+                    
+                    // Configurar ancho de columnas
+                    worksheet.columns = [
+                        { width: 6 },
+                        { width: 15 },
+                        { width: 55 },
+                        { width: 12 },
+                        { width: 12 }
+                    ];
+                    
+                    // Generar y descargar archivo
+                    const buffer = await workbook.xlsx.writeBuffer();
+                    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                    const url = window.URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `Produccion_Articulo_${new Date().toLocaleDateString('es-ES')}.xlsx`;
+                    link.click();
+                    window.URL.revokeObjectURL(url);
+                } catch (error) {
+                    console.error('Error al exportar Excel:', error);
+                    alert('Error al generar el archivo Excel: ' + error.message);
+                }
+            };
+
+            return (
+                <div className="max-w-7xl mx-auto px-2 py-3">
+                    {/* Encabezado con Navegación */}
+                    <header className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div className="text-left">
+                            <h1 className="text-xl font-bold text-gray-800 tracking-tight">
+                                CONTROL DE INSPECCIÓN DE CALIDAD T-CRUDO
+                            </h1>
+                            <h2 className="text-sm text-gray-600 mt-1 hidden print:block">Producción por Artículo</h2>
+                        </div>
+                        
+                        {/* Pestañas de Navegación */}
+                        <nav className="flex flex-wrap items-center gap-2 print:hidden">
+                            <a 
+                                href="principales_defectos.html" 
+                                className="px-2.5 py-1 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                            >
+                                📊 Principales Defectos
+                            </a>
+                            <a 
+                                href="defecto_maquina.html" 
+                                className="px-2.5 py-1 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                            >
+                                🔧 Defectos xMáquina
+                            </a>
+                            <a 
+                                href="produccion_articulo.html" 
+                                className="px-2.5 py-1 text-sm font-medium text-white bg-blue-600 rounded-md transition-colors"
+                            >
+                                📦 Producción xArtículo
+                            </a>
+                            <a 
+                                href="defectos_inspeccion.html" 
+                                className="px-2.5 py-1 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                            >
+                                🔍 Defectos Inspecc.
+                            </a>
+                        </nav>
+                    </header>
+
+                    {/* Filtros Principales */}
+                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-2 mb-3 print:hidden">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex flex-wrap items-center gap-4">
+                                {/* Selector de tipo de filtro */}
+                                <div className="flex items-center gap-4 border-r border-gray-200 pr-4">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="filterType"
+                                            value="fechas"
+                                            checked={filterType === 'fechas'}
+                                            onChange={(e) => setFilterType(e.target.value)}
+                                            className="w-4 h-4 text-blue-600"
+                                        />
+                                        <span className="text-sm font-medium text-gray-700">FECHAS</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="filterType"
+                                            value="op"
+                                            checked={filterType === 'op'}
+                                            onChange={(e) => setFilterType(e.target.value)}
+                                            className="w-4 h-4 text-blue-600"
+                                        />
+                                        <span className="text-sm font-medium text-gray-700">OP</span>
+                                    </label>
+                                </div>
+
+                                {/* Campos de filtro según tipo */}
+                                {filterType === 'fechas' ? (
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-sm font-medium text-gray-700">Inicio</label>
+                                            <input
+                                                type="date"
+                                                value={startDate}
+                                                onChange={(e) => setStartDate(e.target.value)}
+                                                className="px-2 py-1.5 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-sm font-medium text-gray-700">Fin</label>
+                                            <input
+                                                type="date"
+                                                value={endDate}
+                                                onChange={(e) => setEndDate(e.target.value)}
+                                                className="px-2 py-1.5 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                            />
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-sm font-medium text-gray-700">OP</label>
+                                        <input
+                                            type="number"
+                                            value={opInput}
+                                            onChange={(e) => {
+                                                const val = e.target.value.slice(0, 5);
+                                                setOpInput(val);
+                                            }}
+                                            placeholder="00000"
+                                            maxLength={5}
+                                            className="w-24 px-2 py-1.5 border border-gray-300 rounded-md text-xs text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Botón de búsqueda */}
+                                <button
+                                    onClick={handleSearch}
+                                    disabled={isLoading || (filterType === 'op' && opInput.length !== 5)}
+                                    className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center w-10 h-10"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="11" cy="11" r="8"/>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                                    </svg>
+                                </button>
+
+                                {/* Info de registros */}
+                                {rawData.length > 0 && (
+                                    <div className="text-sm text-gray-500">
+                                        <span className="font-semibold text-blue-600">{rawData.length}</span> registros | 
+                                        <span className="font-semibold text-green-600 ml-1">{sortedArticles.length}</span> artículos
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Botones de exportación a la derecha */}
+                            {sortedArticles.length > 0 && (
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={handleExportExcel}
+                                        className="p-2 bg-green-600 text-white rounded-full hover:bg-green-700 transition-colors flex items-center justify-center w-10 h-10"
+                                        title="Descargar Excel"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                                        </svg>
+                                    </button>
+                                    <button
+                                        onClick={() => window.print()}
+                                        className="p-2 bg-gray-600 text-white rounded-full hover:bg-gray-700 transition-colors flex items-center justify-center w-10 h-10"
+                                        title="Imprimir"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="6 9 6 2 18 2 18 9"/>
+                                            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                                            <rect x="6" y="14" width="12" height="8"/>
+                                        </svg>
+                                    </button>
+                                    <label 
+                                        title="Cargar Excel" 
+                                        className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors flex items-center justify-center w-10 h-10 cursor-pointer"
+                                    >
+                                        <IconUpload />
+                                        <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" />
+                                    </label>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Tabla de Resultados */}
+                    <div className="w-full">
+                        {sortedArticles.length > 0 ? (<>
+                            <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                                <div className="overflow-auto max-h-[calc(100vh-220px)]">
+                                    <table className="w-full text-sm">
+                                        <thead className="sticky top-0">
+                                            <tr className="bg-gray-100">
+                                                <th className="px-3 py-2 text-center font-bold text-gray-700 border-b w-12">
+                                                    Nº
+                                                </th>
+                                                <th className="px-3 py-2 text-center font-bold text-gray-700 border-b w-32">
+                                                    Cod. Art.
+                                                </th>
+                                                <th className="px-3 py-2 text-left font-bold text-gray-700 border-b">
+                                                    Descripción
+                                                </th>
+                                                <th className="px-3 py-2 text-center font-bold text-gray-700 border-b bg-blue-50 w-24">
+                                                    Total
+                                                </th>
+                                                <th className="px-3 py-2 text-center font-bold text-gray-700 border-b bg-purple-50 w-20">
+                                                    %Part
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {sortedArticles.map((article, idx) => {
+                                                const percentage = grandTotal > 0 ? ((article.total / grandTotal) * 100).toFixed(1) : 0;
+                                                const rowBgClass = idx % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                                                
+                                                return (
+                                                    <tr key={article.codArt} className={`${rowBgClass} hover:bg-blue-50`}>
+                                                        <td className="px-3 py-1.5 text-center text-gray-500 border-b">
+                                                            {idx + 1}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-center font-mono text-blue-600 border-b">
+                                                            {article.codArt}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-left text-gray-800 border-b">
+                                                            {article.descripcion || '-'}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-center font-bold text-blue-700 border-b bg-blue-50">
+                                                            {article.total.toLocaleString()}
+                                                        </td>
+                                                        <td className="px-3 py-1.5 text-center font-medium text-purple-700 border-b bg-purple-50">
+                                                            {percentage}%
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                        <tfoot>
+                                            <tr className="bg-gray-200 font-bold sticky bottom-0">
+                                                <td colSpan="3" className="px-3 py-2 text-right text-gray-800 border-t">
+                                                    TOTAL
+                                                </td>
+                                                <td className="px-3 py-2 text-center text-blue-800 border-t bg-blue-100">
+                                                    {grandTotal.toLocaleString()}
+                                                </td>
+                                                <td className="px-3 py-2 text-center text-purple-800 border-t bg-purple-100">
+                                                    100%
+                                                </td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+                            
+                            {/* Gráfico de Barras */}
+                            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mt-4">
+                                <h3 className="text-lg font-semibold text-gray-800 mb-3">Participación por Artículo (%)</h3>
+                                <div className="w-full" style={{ height: '200px' }}>
+                                    <BarChart data={sortedArticles} grandTotal={grandTotal} />
+                                </div>
+                            </div>
+                        </>) : rawData.length === 0 && !isLoading ? (
+                            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto text-gray-300 mb-4">
+                                    <circle cx="11" cy="11" r="8"/>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                                </svg>
+                                <p className="text-gray-500">Seleccione los filtros y presione <strong>Buscar</strong> para ver los datos</p>
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            );
+        }
+
+        // Componente de Gráfico de Barras
+        function BarChart({ data, grandTotal }) {
+            const chartRef = React.useRef(null);
+            const chartInstance = React.useRef(null);
+
+            React.useEffect(() => {
+                if (!chartRef.current || !data || data.length === 0) return;
+
+                // Destruir gráfico anterior si existe
+                if (chartInstance.current) {
+                    chartInstance.current.destroy();
+                }
+
+                const ctx = chartRef.current.getContext('2d');
+                
+                // Preparar datos
+                const labels = data.map((_, idx) => idx + 1);
+                const percentages = data.map(article => 
+                    grandTotal > 0 ? parseFloat(((article.total / grandTotal) * 100).toFixed(1)) : 0
+                );
+
+                chartInstance.current = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: '% Participación',
+                            data: percentages,
+                            backgroundColor: 'rgba(249, 115, 22, 0.8)',
+                            borderColor: 'rgba(234, 88, 12, 1)',
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            hoverBackgroundColor: 'rgba(234, 88, 12, 1)'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    title: function(context) {
+                                        const idx = context[0].dataIndex;
+                                        const article = data[idx];
+                                        return `Cod. Art.: ${article.codArt}`;
+                                    },
+                                    beforeBody: function(context) {
+                                        const idx = context[0].dataIndex;
+                                        const article = data[idx];
+                                        const lines = [];
+                                        lines.push(`Descripción: ${article.descripcion || 'N/A'}`);
+                                        lines.push(`Proveedor de Hilo: ${article.proveedorHilo || 'N/A'}`);
+                                        lines.push(`Proveedor Spandex: ${article.proveedorSpandex || 'N/A'}`);
+                                        return lines;
+                                    },
+                                    label: function(context) {
+                                        return '';
+                                    },
+                                    afterBody: function(context) {
+                                        const idx = context[0].dataIndex;
+                                        const article = data[idx];
+                                        const lines = [];
+                                        if (article.topDefects && article.topDefects.length > 0) {
+                                            lines.push('');
+                                            lines.push('Principales 2 defectos:');
+                                            article.topDefects.forEach(([defect, count], i) => {
+                                                lines.push(`  ${i + 1}. ${defect}: ${count}`);
+                                            });
+                                        }
+                                        return lines;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Nº Artículo',
+                                    font: { weight: 'bold' }
+                                },
+                                grid: {
+                                    display: false
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: '% Participación',
+                                    font: { weight: 'bold' }
+                                },
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: function(value) {
+                                        return value + '%';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                return () => {
+                    if (chartInstance.current) {
+                        chartInstance.current.destroy();
+                    }
+                };
+            }, [data, grandTotal]);
+
+            return <canvas ref={chartRef}></canvas>;
+        }
+
+        // Renderizar la aplicación
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

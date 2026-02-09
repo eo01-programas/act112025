@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Defectos Inspección - Control de Calidad</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React y Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- ExcelJS para Excel con mejor soporte de estilos -->
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+    
+    <!-- Librería para leer Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Chart.js para gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <style>
+        body { font-family: Arial, sans-serif; }
+        
+        /* Ocultar spinners en inputs number */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+            appearance: textfield;
+        }
+
+        /* Estilos para botones de filtro */
+        .filter-btn {
+            transition: all 0.2s ease;
+        }
+        .filter-btn:hover {
+            transform: translateY(-1px);
+        }
+        .filter-btn.active {
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+        }
+
+        @media print {
+            @page { size: landscape; margin: 0.8cm; }
+            * {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            body { 
+                background: white; 
+                -webkit-print-color-adjust: exact; 
+                print-color-adjust: exact;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            #root {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            .print\:hidden { display: none !important; }
+            table { width: 100% !important; border-collapse: collapse; page-break-inside: avoid; }
+            thead { display: table-header-group; }
+            tfoot { display: table-footer-group; }
+            tr { page-break-inside: avoid; }
+            th, td { padding: 2px 3px !important; font-size: 8px !important; }
+            header { page-break-after: avoid; }
+            .max-h-screen { max-height: none !important; height: auto !important; overflow: visible !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="root"></div>
+
+    <!-- Botón flotante volver al menú principal -->
+    <a href="index.html" title="Volver al menú principal" style="position:fixed;right:18px;top:18px;width:50px;height:50px;border-radius:50%;background:#001a54;color:#fff;display:flex;align-items:center;justify-content:center;z-index:1100;box-shadow:0 6px 20px rgba(0,0,0,.18);text-decoration:none;font-size:22px;transition:background .2s" onmouseover="this.style.background='#1a3a7a'" onmouseout="this.style.background='#001a54'">&#8592;</a>
+
+    <!-- Modal de carga -->
+    <div id="loading-modal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4 text-center">
+            <div id="modal-spinner" class="mb-4 relative">
+                <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600"></div>
+                <div id="modal-timer" class="absolute inset-0 flex items-center justify-center">
+                    <span class="text-sm font-bold text-blue-600">--</span>
+                </div>
+            </div>
+            <h3 id="modal-title" class="text-lg font-semibold text-gray-800 mb-1">Cargando...</h3>
+            <p id="modal-message" class="text-gray-500 text-sm mb-3">Por favor espere</p>
+            <div class="bg-gray-100 rounded-lg p-2 mb-3">
+                <p id="modal-status" class="text-xs text-gray-500">Procesando...</p>
+            </div>
+            <p id="modal-time-remaining" class="text-xs text-gray-400 mb-3 hidden">Tiempo estimado: <span id="time-text">--</span></p>
+            <button id="modal-close-btn" onclick="document.getElementById('loading-modal').classList.add('hidden'); document.getElementById('modal-spinner').classList.remove('hidden'); document.getElementById('modal-close-btn').classList.add('hidden'); stopModalTimer();" class="hidden bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-6 rounded-lg transition-colors text-sm">
+                Cerrar
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let modalTimerInterval = null;
+        let modalTimeRemaining = 0;
+
+        function startModalTimer(estimatedSeconds) {
+            stopModalTimer();
+            modalTimeRemaining = estimatedSeconds;
+            const timerEl = document.getElementById('modal-timer').querySelector('span');
+            const timeRemainingEl = document.getElementById('modal-time-remaining');
+            const timeTextEl = document.getElementById('time-text');
+            timeRemainingEl.classList.remove('hidden');
+            const updateDisplay = () => {
+                if (modalTimeRemaining > 0) {
+                    timerEl.textContent = modalTimeRemaining + 's';
+                    timeTextEl.textContent = modalTimeRemaining + ' segundos';
+                } else {
+                    timerEl.textContent = '...';
+                    timeTextEl.textContent = 'finalizando...';
+                }
+            };
+            updateDisplay();
+            modalTimerInterval = setInterval(() => {
+                modalTimeRemaining--;
+                updateDisplay();
+                if (modalTimeRemaining < -30) timeTextEl.textContent = 'tomando más de lo esperado...';
+            }, 1000);
+        }
+
+        function stopModalTimer() {
+            if (modalTimerInterval) { clearInterval(modalTimerInterval); modalTimerInterval = null; }
+            const timerEl = document.getElementById('modal-timer');
+            if (timerEl) timerEl.querySelector('span').textContent = '✓';
+            const timeRemainingEl = document.getElementById('modal-time-remaining');
+            if (timeRemainingEl) timeRemainingEl.classList.add('hidden');
+        }
+
+        function resetModalTimer() {
+            stopModalTimer();
+            const timerEl = document.getElementById('modal-timer');
+            if (timerEl) timerEl.querySelector('span').textContent = '--';
+        }
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        // ============================================
+        // CONFIGURACIÓN - URL DE APPS SCRIPT
+        // ============================================
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_sS4m7Mll4uwpiMHImgvDKtZACt6J653r2fgeUFNSr1q0REGhncQeEW9nYUbrJeJo/exec";
+        // ============================================
+
+        // ============================================
+        // CONFIGURACIÓN - CARGA RÁPIDA JSONP (Google Sheets público)
+        // ============================================
+        const SHEET_ID = "1NVfMymJadfFuV5ROJB9ZamsCkXjM6hVRAz_Yku1ce_w";
+        const SHEET_NAME = "base";
+        // ============================================
+
+        // --- FUNCIONES DE CARGA RÁPIDA JSONP ---
+        const gvizToObjects = (resp) => {
+            if (!resp || !resp.table) return [];
+            const cols = (resp.table.cols || []).map(c => String(c.label || c.id || "").trim());
+            return (resp.table.rows || []).map(r => {
+                const o = {};
+                cols.forEach((h, i) => {
+                    const cell = r.c && r.c[i];
+                    o[h] = cell && (cell.v !== null && cell.v !== undefined) ? cell.v : "";
+                });
+                return o;
+            });
+        };
+
+        const loadSheetJSONP = (sheetId, sheetName) => {
+            const TIMEOUT_MS = 15000;
+            return new Promise((resolve, reject) => {
+                const cbName = "GVIZ_CB_" + Math.random().toString(36).slice(2);
+                let script = document.createElement("script");
+                let timer = null;
+
+                function cleanup() {
+                    if (timer) clearTimeout(timer);
+                    if (script && script.parentNode) script.parentNode.removeChild(script);
+                    if (window[cbName]) delete window[cbName];
+                }
+
+                timer = setTimeout(() => {
+                    cleanup();
+                    reject(new Error(`Tiempo de espera agotado al cargar "${sheetName}".`));
+                }, TIMEOUT_MS);
+
+                window[cbName] = function(resp) {
+                    cleanup();
+                    if (resp && resp.status === "error") {
+                        reject(new Error(resp.errors?.[0]?.detailed_message || "Error al cargar datos."));
+                    } else {
+                        resolve(gvizToObjects(resp));
+                    }
+                };
+
+                const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq`;
+                const url = `${base}?sheet=${encodeURIComponent(sheetName)}&headers=2&tq=${encodeURIComponent("select *")}&tqx=out:json;responseHandler:${cbName}&nocache=${Date.now()}`;
+
+                script.src = url;
+                document.head.appendChild(script);
+            });
+        };
+
+        // Función que intenta JSONP primero y Apps Script como fallback
+        const loadSheetDataFast = async () => {
+            // Verificar caché local primero (pero ignorar si tiene 0 registros)
+            const cacheKey = 'all_data';
+            const cached = clientCache.get(cacheKey);
+            if (cached && cached.length > 0) {
+                console.log(`[Cache] ✓ ${cached.length} registros desde caché`);
+                return cached;
+            } else if (cached && cached.length === 0) {
+                console.log('[Cache] ⚠ Caché vacío detectado, recargando desde servidor...');
+                clientCache.clear();
+            }
+
+            // Si hay SHEET_ID configurado, intentar JSONP primero
+            if (SHEET_ID && SHEET_ID.length > 10) {
+                try {
+                    updateModalStatus('Cargando datos (JSONP)...');
+                    console.log('[JSONP] Intentando carga rápida...');
+                    const data = await loadSheetJSONP(SHEET_ID, SHEET_NAME);
+                    if (data && data.length > 0) {
+                        console.log(`[JSONP] ✓ Cargados ${data.length} registros`);
+                        clientCache.set('all_data', data);
+                        return data;
+                    } else {
+                        console.log('[JSONP] ⚠ No se recibieron datos, NO guardando en caché');
+                    }
+                } catch (err) {
+                    console.log('[JSONP] Falló:', err.message);
+                }
+            }
+            // Fallback a Apps Script
+            updateModalStatus('Cargando datos (servidor)...');
+            return await fetchAllData();
+        };
+
+        // ============================================
+        // CACHÉ LOCAL CON SESSIONSTORAGE (persistente entre páginas)
+        // ============================================
+        class LocalCache {
+            constructor(duration = 600000) {
+                this.duration = duration;
+                this.storageKey = 'calidad_textil_cache';
+            }
+            
+            _getStorage() {
+                try {
+                    const stored = sessionStorage.getItem(this.storageKey);
+                    return stored ? JSON.parse(stored) : {};
+                } catch (e) {
+                    return {};
+                }
+            }
+            
+            _setStorage(data) {
+                try {
+                    sessionStorage.setItem(this.storageKey, JSON.stringify(data));
+                } catch (e) {
+                    // Si sessionStorage está lleno, limpiar y reintentar
+                    sessionStorage.clear();
+                    try {
+                        sessionStorage.setItem(this.storageKey, JSON.stringify(data));
+                    } catch (e2) {
+                        console.warn('No se pudo guardar en sessionStorage');
+                    }
+                }
+            }
+            
+            get(key) {
+                const storage = this._getStorage();
+                const item = storage[key];
+                if (!item) return null;
+                
+                if (Date.now() - item.timestamp > this.duration) {
+                    delete storage[key];
+                    this._setStorage(storage);
+                    return null;
+                }
+                
+                return item.data;
+            }
+            
+            set(key, data) {
+                const storage = this._getStorage();
+                storage[key] = {
+                    data: data,
+                    timestamp: Date.now()
+                };
+                this._setStorage(storage);
+            }
+            
+            clear() {
+                sessionStorage.removeItem(this.storageKey);
+            }
+            
+            clearPattern(pattern) {
+                const storage = this._getStorage();
+                let changed = false;
+                for (const key of Object.keys(storage)) {
+                    if (key.includes(pattern)) {
+                        delete storage[key];
+                        changed = true;
+                    }
+                }
+                if (changed) this._setStorage(storage);
+            }
+        }
+        
+        const clientCache = new LocalCache(600000); // 10 minutos
+
+        // --- FUNCIONES DEL MODAL (con retardo de 5s) ---
+        let modalShowTimeout = null;
+        let modalPendingConfig = null;
+
+        const _actuallyShowModal = () => {
+            if (!modalPendingConfig) return;
+            const { title, message, status, estimatedSeconds } = modalPendingConfig;
+            resetModalTimer();
+            document.getElementById('modal-spinner').classList.remove('hidden');
+            document.getElementById('modal-close-btn').classList.add('hidden');
+            document.getElementById('modal-title').textContent = title || 'Cargando...';
+            document.getElementById('modal-message').textContent = message || 'Por favor espere';
+            document.getElementById('modal-status').textContent = status || 'Procesando...';
+            document.getElementById('loading-modal').classList.remove('hidden');
+            if (estimatedSeconds > 0) {
+                startModalTimer(estimatedSeconds);
+            }
+        };
+
+        const showLoadingModal = (title, message, status, estimatedSeconds = 0) => {
+            if (modalShowTimeout) { clearTimeout(modalShowTimeout); modalShowTimeout = null; }
+            modalPendingConfig = { title, message, status, estimatedSeconds };
+            modalShowTimeout = setTimeout(_actuallyShowModal, 5000);
+        };
+
+        const updateModalStatus = (status) => {
+            if (modalPendingConfig) modalPendingConfig.status = status;
+            if (!document.getElementById('loading-modal').classList.contains('hidden')) {
+                document.getElementById('modal-status').textContent = status;
+            }
+        };
+
+        const hideLoadingModal = () => {
+            if (modalShowTimeout) { clearTimeout(modalShowTimeout); modalShowTimeout = null; }
+            modalPendingConfig = null;
+            stopModalTimer();
+            document.getElementById('loading-modal').classList.add('hidden');
+        };
+
+        const showModalError = (message, details) => {
+            if (modalShowTimeout) { clearTimeout(modalShowTimeout); modalShowTimeout = null; }
+            modalPendingConfig = null;
+            stopModalTimer();
+            document.getElementById('modal-spinner').classList.add('hidden');
+            document.getElementById('modal-title').textContent = '❌ Error';
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal-status').textContent = details || 'Intente nuevamente';
+            document.getElementById('modal-close-btn').classList.remove('hidden');
+            document.getElementById('loading-modal').classList.remove('hidden');
+        };
+
+        const showModalSuccess = (message, details) => {
+            if (modalShowTimeout) { clearTimeout(modalShowTimeout); modalShowTimeout = null; }
+            modalPendingConfig = null;
+            stopModalTimer();
+            if (!document.getElementById('loading-modal').classList.contains('hidden')) {
+                document.getElementById('modal-title').textContent = '✅ ¡Completado!';
+                document.getElementById('modal-message').textContent = message;
+                document.getElementById('modal-status').textContent = details;
+                setTimeout(hideLoadingModal, 3000);
+            }
+        };
+
+        // --- FUNCIÓN PARA OBTENER TODOS LOS DATOS ---
+        const fetchAllData = async () => {
+            if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("PEGAR_AQUI")) {
+                return null;
+            }
+
+            const cacheKey = 'all_data';
+            const cached = clientCache.get(cacheKey);
+            // Solo usar caché si tiene datos válidos (más de 0 registros)
+            if (cached && cached.length > 0) {
+                updateModalStatus(`✓ ${cached.length} registro(s) cargado(s) desde caché local`);
+                return cached;
+            } else if (cached && cached.length === 0) {
+                console.log('[Cache] ⚠ Caché vacío en fetchAllData, limpiando...');
+                clientCache.clear();
+            }
+
+            try {
+                const url = `${APPS_SCRIPT_URL}?action=getAllData`;
+                console.log('fetchAllData url=', url);
+                
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 90000);
+
+                updateModalStatus('Descargando todos los datos...');
+                const response = await fetch(url, { signal: controller.signal });
+                clearTimeout(timeout);
+                
+                console.log('fetchAllData response.ok=', response.ok, 'status=', response.status);
+
+                const text = await response.text();
+                console.log('fetchAllData - tamaño respuesta:', text.length, 'bytes');
+                
+                let result = null;
+                try {
+                    result = JSON.parse(text);
+                } catch (err) {
+                    console.log('fetchAllData - respuesta no JSON:', text.slice(0, 1000));
+                }
+
+                if (result && result.success && result.data && Array.isArray(result.data)) {
+                    console.log(`Servidor devolvió ${result.data.length} registros totales`);
+                    // Solo guardar en caché si hay datos válidos
+                    if (result.data.length > 0) {
+                        clientCache.set(cacheKey, result.data);
+                    } else {
+                        console.log('[Cache] ⚠ No guardando en caché porque hay 0 registros');
+                    }
+                    return result.data;
+                }
+                // Mostrar más detalles del error
+                if (result && !result.success) {
+                    console.log('fetchAllData - error del servidor:', result.error || result.message || 'Error desconocido');
+                }
+                console.log('fetchAllData - no se recibió data válida', result);
+            } catch (error) {
+                console.log("Error obteniendo todos los datos (getAllData):", error);
+            }
+            return null;
+        };
+
+        // --- ICONO SVG PARA CARGAR EXCEL ---
+        const IconUpload = () => (<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>);
+
+        // --- FUNCIÓN PARA SINCRONIZAR CON GOOGLE SHEETS ---
+        const syncWithGoogleSheet = async (rows) => {
+            if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("PEGAR_AQUI")) {
+                throw new Error("Configure la URL de Apps Script en el código");
+            }
+
+            const response = await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ rows: rows })
+            });
+
+            return { success: true, message: "Datos enviados al servidor" };
+        };
+
+        // ============================================
+        // COMPONENTE PRINCIPAL
+        // ============================================
+        function App() {
+            // Estado de filtros principales
+            const [selectedYear, setSelectedYear] = useState('');
+            const [periodoType, setPeriodoType] = useState('Sem'); // 'Sem' o 'Mes'
+            const [periodoInicio, setPeriodoInicio] = useState('');
+            const [periodoFin, setPeriodoFin] = useState('');
+            
+            // Estado de datos
+            const [rawData, setRawData] = useState([]);
+            const [isLoading, setIsLoading] = useState(false);
+            const [dataLoaded, setDataLoaded] = useState(false);
+
+            // Mapa de meses para ordenamiento
+            const mesesOrden = {
+                'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6,
+                'jul': 7, 'ago': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dic': 12
+            };
+            
+            // Extraer valores únicos de los datos
+            const uniqueValues = useMemo(() => {
+                const years = new Set();
+                const semanas = new Set();
+                const meses = new Set();
+                
+                rawData.forEach(row => {
+                    const year = String(row['Año'] || row['Anio'] || row['Year'] || '').trim();
+                    const semana = String(row['Semana'] || row['Week'] || '').trim();
+                    const mes = String(row['Mes'] || row['Month'] || '').trim();
+                    
+                    if (year) years.add(year);
+                    if (semana && !isNaN(parseInt(semana))) semanas.add(parseInt(semana));
+                    if (mes) meses.add(mes);
+                });
+                
+                // Ordenar meses por su orden natural
+                const mesesOrdenados = Array.from(meses).sort((a, b) => {
+                    const ordenA = mesesOrden[String(a).toLowerCase().substring(0, 3)] || 0;
+                    const ordenB = mesesOrden[String(b).toLowerCase().substring(0, 3)] || 0;
+                    return ordenA - ordenB;
+                });
+                
+                return {
+                    years: Array.from(years).sort((a, b) => b - a), // Más reciente primero
+                    semanas: Array.from(semanas).sort((a, b) => a - b),
+                    meses: mesesOrdenados
+                };
+            }, [rawData]);
+
+            // Opciones de periodo según tipo seleccionado
+            const periodoOptions = useMemo(() => {
+                return periodoType === 'Sem' ? uniqueValues.semanas : uniqueValues.meses;
+            }, [periodoType, uniqueValues]);
+
+            // Filtrar datos según selección
+            const filteredData = useMemo(() => {
+                if (!selectedYear || !periodoInicio || !periodoFin) return [];
+                
+                return rawData.filter(row => {
+                    const rowYear = String(row['Año'] || row['Anio'] || row['Year'] || '').trim();
+                    
+                    if (periodoType === 'Sem') {
+                        const rowSemana = parseInt(row['Semana'] || row['Week'] || 0);
+                        const inicio = parseInt(periodoInicio);
+                        const fin = parseInt(periodoFin);
+                        return rowYear === selectedYear && rowSemana >= inicio && rowSemana <= fin;
+                    } else {
+                        // Para meses, comparar por orden del mes
+                        const rowMes = String(row['Mes'] || row['Month'] || '').trim();
+                        const rowMesOrden = mesesOrden[rowMes.toLowerCase().substring(0, 3)] || 0;
+                        const inicioOrden = mesesOrden[String(periodoInicio).toLowerCase().substring(0, 3)] || 0;
+                        const finOrden = mesesOrden[String(periodoFin).toLowerCase().substring(0, 3)] || 0;
+                        return rowYear === selectedYear && rowMesOrden >= inicioOrden && rowMesOrden <= finOrden;
+                    }
+                });
+            }, [rawData, selectedYear, periodoType, periodoInicio, periodoFin]);
+
+            // Agrupar datos por periodo (Semana o Mes)
+            const groupedData = useMemo(() => {
+                const result = {};
+                
+                filteredData.forEach(row => {
+                    const periodo = periodoType === 'Sem'
+                        ? parseInt(row['Semana'] || row['Week'] || 0)
+                        : String(row['Mes'] || row['Month'] || '').trim();
+                    
+                    if (!periodo) return;
+                    
+                    if (!result[periodo]) {
+                        result[periodo] = {
+                            periodo: periodo,
+                            peso: 0,
+                            rollos: 0
+                        };
+                    }
+                    
+                    // Sumar Peso
+                    const peso = parseFloat(row['Peso'] || row['Weight'] || 0) || 0;
+                    result[periodo].peso += peso;
+                    
+                    // Contar Rollos (cada fila es un rollo)
+                    result[periodo].rollos += 1;
+                });
+                
+                return result;
+            }, [filteredData, periodoType]);
+
+            // Convertir a array ordenado
+            const sortedData = useMemo(() => {
+                return Object.values(groupedData).sort((a, b) => {
+                    if (periodoType === 'Sem') {
+                        return a.periodo - b.periodo;
+                    } else {
+                        const ordenA = mesesOrden[String(a.periodo).toLowerCase().substring(0, 3)] || 0;
+                        const ordenB = mesesOrden[String(b.periodo).toLowerCase().substring(0, 3)] || 0;
+                        return ordenA - ordenB;
+                    }
+                });
+            }, [groupedData, periodoType]);
+
+            // Calcular totales
+            const totals = useMemo(() => {
+                return sortedData.reduce((acc, item) => ({
+                    peso: acc.peso + item.peso,
+                    rollos: acc.rollos + item.rollos
+                }), { peso: 0, rollos: 0 });
+            }, [sortedData]);
+
+            // --- FUNCIÓN PARA CARGAR ARCHIVO EXCEL ---
+            const handleFileUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                e.target.value = '';
+
+                showLoadingModal(
+                    'Cargando archivo...',
+                    'Leyendo datos del Excel',
+                    `Archivo: ${file.name}`,
+                    5
+                );
+
+                const reader = new FileReader();
+                reader.onload = async (evt) => {
+                    try {
+                        updateModalStatus('Procesando archivo Excel...');
+                        
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: 'binary' });
+                        const wsname = wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        
+                        const rawExcelData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                        
+                        let headerRowIndex = 1;
+                        for (let i = 0; i < Math.min(rawExcelData.length, 10); i++) {
+                            const rowStr = JSON.stringify(rawExcelData[i]).toUpperCase();
+                            if (rowStr.includes("OP") && (rowStr.includes("PARTIDA") || rowStr.includes("ROLLO"))) {
+                                headerRowIndex = i;
+                                break;
+                            }
+                        }
+
+                        const jsonDataRaw = XLSX.utils.sheet_to_json(ws, { range: headerRowIndex, defval: "" });
+                        
+                        // Obtener el nombre de la columna AA (índice 26) para filtrar filas con "TOTAL"
+                        const headers = rawExcelData[headerRowIndex] || [];
+                        const colAAName = headers[26]; // Columna AA es índice 26
+                        
+                        // Filtrar filas que contengan "TOTAL" en la columna AA
+                        const jsonData = jsonDataRaw.filter(row => {
+                            const cellValue = colAAName ? String(row[colAAName] || '').toUpperCase().trim() : '';
+                            return cellValue !== 'TOTAL';
+                        });
+                        
+                        if (jsonData.length === 0) {
+                            document.getElementById('modal-title').textContent = '❌ Error';
+                            document.getElementById('modal-message').textContent = 'No se encontraron datos válidos';
+                            document.getElementById('modal-status').textContent = 'El archivo no contiene datos o el formato es incorrecto';
+                            setTimeout(hideLoadingModal, 4000);
+                            return;
+                        }
+
+                        updateModalStatus(`${jsonData.length} filas encontradas. Sincronizando con la base de datos...`);
+
+                        try {
+                            await syncWithGoogleSheet(jsonData);
+                            clientCache.clear();
+                            
+                            document.getElementById('modal-title').textContent = '✅ ¡Completado!';
+                            document.getElementById('modal-message').textContent = `Se procesaron ${jsonData.length} filas correctamente`;
+                            document.getElementById('modal-status').textContent = 'Los datos han sido sincronizados con la base de datos. Presione Buscar para ver los cambios.';
+                            setTimeout(hideLoadingModal, 3000);
+                        } catch (syncError) {
+                            console.error('Error de sincronización:', syncError);
+                            document.getElementById('modal-title').textContent = '❌ Error';
+                            document.getElementById('modal-message').textContent = 'Error al sincronizar con la base de datos';
+                            document.getElementById('modal-status').textContent = syncError.message || 'Intente nuevamente';
+                            setTimeout(hideLoadingModal, 4000);
+                        }
+                        
+                    } catch (error) {
+                        console.error(error);
+                        document.getElementById('modal-title').textContent = '❌ Error';
+                        document.getElementById('modal-message').textContent = 'Error al leer el archivo';
+                        document.getElementById('modal-status').textContent = error.message || 'Formato de archivo no válido';
+                        setTimeout(hideLoadingModal, 4000);
+                    }
+                };
+                
+                reader.onerror = () => {
+                    document.getElementById('modal-title').textContent = '❌ Error';
+                    document.getElementById('modal-message').textContent = 'Error al leer el archivo';
+                    document.getElementById('modal-status').textContent = 'No se pudo leer el archivo seleccionado';
+                    setTimeout(hideLoadingModal, 4000);
+                };
+                
+                reader.readAsBinaryString(file);
+            };
+
+            // Cargar datos iniciales
+            const loadInitialData = useCallback(async () => {
+                if (dataLoaded) return;
+                
+                setIsLoading(true);
+                showLoadingModal('Cargando datos...', 'Obteniendo información del servidor', 'Conectando...', 5);
+
+                try {
+                    console.log('loadInitialData - Iniciando carga de datos...');
+                    const data = await loadSheetDataFast();
+                    console.log('loadInitialData - Datos recibidos:', data ? data.length : 'null');
+                    
+                    if (data && data.length > 0) {
+                        // Debug: mostrar columnas disponibles
+                        console.log('loadInitialData - Columnas disponibles:', Object.keys(data[0]));
+                        console.log('loadInitialData - Primera fila:', data[0]);
+                        
+                        setRawData(data);
+                        setDataLoaded(true);
+                        updateModalStatus(`✓ ${data.length} registros cargados`);
+                    } else {
+                        console.log('loadInitialData - No se recibieron datos del servidor');
+                        updateModalStatus('No se encontraron datos en el servidor');
+                    }
+                } catch (error) {
+                    console.error('Error cargando datos:', error);
+                    updateModalStatus('Error al cargar datos: ' + error.message);
+                } finally {
+                    setTimeout(() => {
+                        setIsLoading(false);
+                        hideLoadingModal();
+                    }, 500);
+                }
+            }, [dataLoaded]);
+
+            // Cargar datos al montar el componente
+            useEffect(() => {
+                loadInitialData();
+            }, [loadInitialData]);
+
+            // Actualizar valores por defecto cuando se cargan los datos
+            useEffect(() => {
+                if (uniqueValues.years.length > 0 && !selectedYear) {
+                    // Seleccionar el último año (el más reciente)
+                    setSelectedYear(uniqueValues.years[0]);
+                }
+            }, [uniqueValues.years]);
+
+            useEffect(() => {
+                if (periodoOptions.length > 0) {
+                    if (periodoType === 'Sem') {
+                        // Para semanas: última semana y 7 semanas antes
+                        const lastWeek = Math.max(...periodoOptions);
+                        const startWeek = Math.max(Math.min(...periodoOptions), lastWeek - 7);
+                        
+                        if (!periodoFin || !periodoOptions.includes(parseInt(periodoFin))) {
+                            setPeriodoFin(String(lastWeek));
+                        }
+                        if (!periodoInicio || !periodoOptions.includes(parseInt(periodoInicio))) {
+                            setPeriodoInicio(String(startWeek));
+                        }
+                    } else {
+                        // Para meses: mantener comportamiento original (primero y último)
+                        if (!periodoInicio || !periodoOptions.includes(periodoInicio)) {
+                            setPeriodoInicio(String(periodoOptions[0]));
+                        }
+                        if (!periodoFin || !periodoOptions.includes(periodoFin)) {
+                            setPeriodoFin(String(periodoOptions[periodoOptions.length - 1]));
+                        }
+                    }
+                }
+            }, [periodoOptions, periodoType]);
+
+            // Manejar búsqueda/actualización
+            const handleSearch = useCallback(async () => {
+                setIsLoading(true);
+                showLoadingModal('Actualizando datos...', 'Recargando información del servidor', 'Conectando...', 5);
+
+                try {
+                    clientCache.clear();
+                    const data = await loadSheetDataFast();
+                    
+                    if (data && data.length > 0) {
+                        setRawData(data);
+                        updateModalStatus(`✓ ${data.length} registros actualizados`);
+                    }
+                } catch (error) {
+                    console.error('Error actualizando datos:', error);
+                    updateModalStatus('Error: ' + error.message);
+                } finally {
+                    setTimeout(() => {
+                        setIsLoading(false);
+                        hideLoadingModal();
+                    }, 500);
+                }
+            }, []);
+
+            // Exportar a Excel
+            const handleExportExcel = async () => {
+                try {
+                    if (!window.ExcelJS) {
+                        alert('La librería de Excel no se ha cargado. Por favor, recarga la página.');
+                        return;
+                    }
+                    
+                    const workbook = new window.ExcelJS.Workbook();
+                    const worksheet = workbook.addWorksheet("Defectos Inspección");
+                    
+                    // Título
+                    const titleRow = worksheet.addRow(["CONTROL DE INSPECCIÓN DE CALIDAD T-CRUDO"]);
+                    titleRow.font = { bold: true, size: 14, name: 'Calibri' };
+                    
+                    // Subtítulo
+                    const subtitleRow = worksheet.addRow([`Defectos Inspección - Año ${selectedYear} - ${periodoType === 'Sem' ? 'Semanas' : 'Meses'} ${periodoInicio} a ${periodoFin}`]);
+                    subtitleRow.font = { bold: true, size: 11, name: 'Calibri' };
+                    
+                    worksheet.addRow([]);
+                    
+                    // Encabezados
+                    const periodoLabel = periodoType === 'Sem' ? 'Semana' : 'Mes';
+                    const headers = [periodoLabel, "Peso (Kg)", "Rollos"];
+                    const headerRow = worksheet.addRow(headers);
+                    headerRow.font = { bold: true, color: { argb: 'FF000000' } };
+                    headerRow.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FFD3D3D3' }
+                    };
+                    headerRow.alignment = { horizontal: 'center', vertical: 'center' };
+                    
+                    headerRow.eachCell(cell => {
+                        cell.border = {
+                            top: { style: 'thin' },
+                            left: { style: 'thin' },
+                            bottom: { style: 'thin' },
+                            right: { style: 'thin' }
+                        };
+                    });
+                    
+                    // Datos
+                    sortedData.forEach((item, index) => {
+                        const dataRow = worksheet.addRow([
+                            item.periodo,
+                            Math.round(item.peso).toLocaleString(),
+                            item.rollos.toLocaleString()
+                        ]);
+                        
+                        dataRow.eachCell((cell, colNumber) => {
+                            cell.border = {
+                                top: { style: 'thin' },
+                                left: { style: 'thin' },
+                                bottom: { style: 'thin' },
+                                right: { style: 'thin' }
+                            };
+                            cell.alignment = { horizontal: 'center', vertical: 'center' };
+                        });
+                    });
+                    
+                    // Totales
+                    const footerRow = worksheet.addRow(['Total general', Math.round(totals.peso).toLocaleString(), totals.rollos.toLocaleString()]);
+                    footerRow.font = { bold: true };
+                    footerRow.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FFD3D3D3' }
+                    };
+                    footerRow.eachCell(cell => {
+                        cell.border = {
+                            top: { style: 'thin' },
+                            left: { style: 'thin' },
+                            bottom: { style: 'thin' },
+                            right: { style: 'thin' }
+                        };
+                        cell.alignment = { horizontal: 'center', vertical: 'center' };
+                    });
+                    
+                    // Anchos de columna
+                    worksheet.columns = [
+                        { width: 15 },
+                        { width: 18 },
+                        { width: 15 }
+                    ];
+                    
+                    // Descargar
+                    const buffer = await workbook.xlsx.writeBuffer();
+                    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                    const url = window.URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `Defectos_Inspeccion_${selectedYear}_${periodoType}${periodoInicio}-${periodoFin}.xlsx`;
+                    link.click();
+                    window.URL.revokeObjectURL(url);
+                } catch (error) {
+                    console.error('Error al exportar Excel:', error);
+                    alert('Error al generar el archivo Excel: ' + error.message);
+                }
+            };
+
+            return (
+                <div className="max-w-7xl mx-auto px-2 py-3">
+                    {/* Encabezado con Navegación */}
+                    <header className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div className="text-left">
+                            <h1 className="text-xl font-bold text-gray-800 tracking-tight">
+                                CONTROL DE INSPECCIÓN DE CALIDAD T-CRUDO
+                            </h1>
+                            <h2 className="text-sm text-gray-600 mt-1 hidden print:block">Defectos Inspección</h2>
+                        </div>
+                        
+                        {/* Pestañas de Navegación */}
+                        <nav className="flex flex-wrap items-center gap-2 print:hidden">
+                            <a 
+                                href="principales_defectos.html" 
+                                className="px-2.5 py-1 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                            >
+                                📊 Principales Defectos
+                            </a>
+                            <a 
+                                href="defecto_maquina.html" 
+                                className="px-2.5 py-1 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                            >
+                                🔧 Defectos xMáquina
+                            </a>
+                            <a 
+                                href="produccion_articulo.html" 
+                                className="px-2.5 py-1 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                            >
+                                📦 Producción xArtículo
+                            </a>
+                            <a 
+                                href="defectos_inspeccion.html" 
+                                className="px-2.5 py-1 text-sm font-medium text-white bg-blue-600 rounded-md transition-colors"
+                            >
+                                🔍 Defectos Inspecc.
+                            </a>
+                        </nav>
+                    </header>
+
+                    {/* Filtros Principales */}
+                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3 print:hidden">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex flex-wrap items-center gap-4">
+                                {/* Filtro de Año */}
+                                <div className="flex items-center gap-2 border-r border-gray-200 pr-4">
+                                    <label className="text-sm font-medium text-gray-700">Año</label>
+                                    <select
+                                        value={selectedYear}
+                                        onChange={(e) => setSelectedYear(e.target.value)}
+                                        className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                    >
+                                        <option value="">Seleccionar...</option>
+                                        {uniqueValues.years.map(year => (
+                                            <option key={year} value={year}>{year}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* Selector de tipo de periodo */}
+                                <div className="flex items-center gap-3 border-r border-gray-200 pr-4">
+                                    <span className="text-sm font-medium text-gray-700">Periodo</span>
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="periodoType"
+                                            value="Sem"
+                                            checked={periodoType === 'Sem'}
+                                            onChange={(e) => {
+                                                setPeriodoType(e.target.value);
+                                                setPeriodoInicio('');
+                                                setPeriodoFin('');
+                                            }}
+                                            className="w-4 h-4 text-blue-600"
+                                        />
+                                        <span className="text-sm text-gray-700">Sem</span>
+                                    </label>
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="periodoType"
+                                            value="Mes"
+                                            checked={periodoType === 'Mes'}
+                                            onChange={(e) => {
+                                                setPeriodoType(e.target.value);
+                                                setPeriodoInicio('');
+                                                setPeriodoFin('');
+                                            }}
+                                            className="w-4 h-4 text-blue-600"
+                                        />
+                                        <span className="text-sm text-gray-700">Mes</span>
+                                    </label>
+                                </div>
+
+                                {/* Filtros de Inicio y Fin */}
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-sm font-medium text-gray-700">Inicio</label>
+                                        <select
+                                            value={periodoInicio}
+                                            onChange={(e) => setPeriodoInicio(e.target.value)}
+                                            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white min-w-[80px]"
+                                        >
+                                            <option value="">--</option>
+                                            {periodoOptions.map(opt => (
+                                                <option key={opt} value={opt}>{opt}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-sm font-medium text-gray-700">Fin</label>
+                                        <select
+                                            value={periodoFin}
+                                            onChange={(e) => setPeriodoFin(e.target.value)}
+                                            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white min-w-[80px]"
+                                        >
+                                            <option value="">--</option>
+                                            {periodoOptions.map(opt => (
+                                                <option key={opt} value={opt}>{opt}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {/* Botón de actualizar */}
+                                <button
+                                    onClick={handleSearch}
+                                    disabled={isLoading}
+                                    className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center w-10 h-10"
+                                    title="Actualizar datos"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                                        <path d="M3 3v5h5"/>
+                                        <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+                                        <path d="M16 21h5v-5"/>
+                                    </svg>
+                                </button>
+
+                                {/* Info de registros */}
+                                {filteredData.length > 0 && (
+                                    <div className="text-sm text-gray-500">
+                                        <span className="font-semibold text-blue-600">{filteredData.length}</span> registros filtrados
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Botones de exportación */}
+                            {sortedData.length > 0 && (
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={handleExportExcel}
+                                        className="p-2 bg-green-600 text-white rounded-full hover:bg-green-700 transition-colors flex items-center justify-center w-10 h-10"
+                                        title="Descargar Excel"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM13 9V3.5L18.5 9H13zM8.5 17v-4h1v4h-1zm2 0v-2.5h1V17h-1zm2 0v-4h1v4h-1z"/>
+                                        </svg>
+                                    </button>
+                                    <button
+                                        onClick={() => {setTimeout(() => window.print(), 100);}}
+                                        className="p-2 bg-gray-600 text-white rounded-full hover:bg-gray-700 transition-colors flex items-center justify-center w-10 h-10"
+                                        title="Imprimir (Horizontal - Una página)"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="6 9 6 2 18 2 18 9"/>
+                                            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                                            <rect x="6" y="14" width="12" height="8"/>
+                                        </svg>
+                                    </button>
+                                    <label 
+                                        title="Cargar Excel" 
+                                        className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors flex items-center justify-center w-10 h-10 cursor-pointer"
+                                    >
+                                        <IconUpload />
+                                        <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" />
+                                    </label>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Tabla de Resultados */}
+                    <div className="w-full">
+                        {sortedData.length > 0 ? (
+                            <div className="flex gap-4">
+                                {/* Columna izquierda - Tabla (25%) */}
+                                <div className="w-1/4 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                                    <div className="overflow-auto max-h-[calc(100vh-280px)]">
+                                        <table className="w-full text-sm">
+                                            <thead className="sticky top-0">
+                                                <tr className="bg-gray-100">
+                                                    <th className="px-2 py-1.5 text-center font-bold text-gray-700 border-b text-xs">
+                                                        {periodoType === 'Sem' ? 'Semana' : 'Mes'}
+                                                    </th>
+                                                    <th className="px-2 py-1.5 text-center font-bold text-gray-700 border-b text-xs">
+                                                        Peso (Kg)
+                                                    </th>
+                                                    <th className="px-2 py-1.5 text-center font-bold text-gray-700 border-b text-xs">
+                                                        Rollos
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {sortedData.map((item, idx) => {
+                                                    const rowBgClass = idx % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                                                    
+                                                    return (
+                                                        <tr key={item.periodo} className={`${rowBgClass} hover:bg-blue-50`}>
+                                                            <td className="px-2 py-1 text-center font-medium text-gray-800 border-b text-xs">
+                                                                {item.periodo}
+                                                            </td>
+                                                            <td className="px-2 py-1 text-center font-semibold text-green-700 border-b text-xs">
+                                                                {Math.round(item.peso).toLocaleString('es-ES')}
+                                                            </td>
+                                                            <td className="px-2 py-1 text-center font-semibold text-blue-700 border-b text-xs">
+                                                                {item.rollos.toLocaleString()}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                            <tfoot>
+                                                <tr className="bg-gray-200 font-bold sticky bottom-0">
+                                                    <td className="px-2 py-1.5 text-center text-gray-800 border-t text-xs">
+                                                        Total general
+                                                    </td>
+                                                    <td className="px-2 py-1.5 text-center text-green-800 border-t text-xs">
+                                                        {Math.round(totals.peso).toLocaleString('es-ES')}
+                                                    </td>
+                                                    <td className="px-2 py-1.5 text-center text-blue-800 border-t text-xs">
+                                                        {totals.rollos.toLocaleString()}
+                                                    </td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                </div>
+                                
+                                {/* Columna derecha - Gráfico (75%) */}
+                                <div className="w-3/4 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="text-lg font-semibold text-gray-800">
+                                            Producción por {periodoType === 'Sem' ? 'Semana' : 'Mes'}
+                                        </h3>
+                                        <div id="chart-legend" className="flex items-center gap-4 text-sm"></div>
+                                    </div>
+                                    <div className="w-full" style={{ height: '350px' }}>
+                                        <BarChart data={sortedData} periodoType={periodoType} />
+                                    </div>
+                                </div>
+                            </div>
+                        ) : !isLoading && dataLoaded ? (
+                            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto text-gray-300 mb-4">
+                                    <circle cx="11" cy="11" r="8"/>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                                </svg>
+                                <p className="text-gray-500">Seleccione los filtros para ver los datos de inspección</p>
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            );
+        }
+
+        // Componente de Gráfico de Barras
+        function BarChart({ data, periodoType }) {
+            const chartRef = React.useRef(null);
+            const chartInstance = React.useRef(null);
+
+            React.useEffect(() => {
+                if (!chartRef.current || !data || data.length === 0) return;
+
+                if (chartInstance.current) {
+                    chartInstance.current.destroy();
+                }
+
+                const ctx = chartRef.current.getContext('2d');
+                
+                const labels = data.map(item => item.periodo);
+                const pesoData = data.map(item => Math.round(item.peso));
+                const rollosData = data.map(item => item.rollos);
+
+                // Plugin para mostrar etiquetas de datos
+                const datalabelsPlugin = {
+                    id: 'datalabels',
+                    afterDatasetsDraw(chart) {
+                        const { ctx } = chart;
+                        chart.data.datasets.forEach((dataset, datasetIndex) => {
+                            const meta = chart.getDatasetMeta(datasetIndex);
+                            meta.data.forEach((element, index) => {
+                                const value = dataset.data[index];
+                                ctx.save();
+                                ctx.font = 'bold 12px Arial';
+                                ctx.textAlign = 'center';
+                                
+                                if (dataset.type === 'line' || datasetIndex === 1) {
+                                    // Línea/puntos: etiqueta arriba del punto
+                                    ctx.fillStyle = 'rgba(59, 130, 246, 1)';
+                                    ctx.fillText(value.toLocaleString('es-ES'), element.x, element.y - 12);
+                                } else {
+                                    // Barras: etiqueta en el medio de la barra
+                                    ctx.fillStyle = '#ffffff';
+                                    ctx.font = 'bold 11px Arial';
+                                    const yPos = element.y + (element.base - element.y) / 2;
+                                    ctx.fillText(value.toLocaleString('es-ES'), element.x, yPos + 4);
+                                }
+                                ctx.restore();
+                            });
+                        });
+                    }
+                };
+                
+                // Plugin para leyenda personalizada externa
+                const htmlLegendPlugin = {
+                    id: 'htmlLegend',
+                    afterUpdate(chart) {
+                        const legendContainer = document.getElementById('chart-legend');
+                        if (!legendContainer) return;
+                        
+                        let html = '';
+                        chart.data.datasets.forEach((dataset, i) => {
+                            const bgColor = dataset.type === 'line' ? dataset.borderColor : dataset.backgroundColor;
+                            const icon = dataset.type === 'line' 
+                                ? `<span style="display:inline-block;width:20px;height:3px;background:${bgColor};margin-right:4px;vertical-align:middle;"></span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${bgColor};margin-left:-14px;margin-right:6px;vertical-align:middle;"></span>`
+                                : `<span style="display:inline-block;width:14px;height:14px;background:${bgColor};margin-right:6px;vertical-align:middle;border-radius:2px;"></span>`;
+                            html += `<div class="flex items-center"><span>${icon}</span><span class="text-gray-700 font-medium">${dataset.label}</span></div>`;
+                        });
+                        legendContainer.innerHTML = html;
+                    }
+                };
+
+                chartInstance.current = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Peso (Kg)',
+                                data: pesoData,
+                                backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                                borderColor: 'rgba(34, 197, 94, 1)',
+                                borderWidth: 1,
+                                yAxisID: 'y',
+                                order: 2
+                            },
+                            {
+                                type: 'line',
+                                label: 'Rollos',
+                                data: rollosData,
+                                borderColor: 'rgba(59, 130, 246, 1)',
+                                backgroundColor: 'rgba(59, 130, 246, 1)',
+                                borderWidth: 2,
+                                pointRadius: 5,
+                                pointBackgroundColor: 'rgba(59, 130, 246, 1)',
+                                pointBorderColor: '#ffffff',
+                                pointBorderWidth: 2,
+                                tension: 0.1,
+                                yAxisID: 'y1',
+                                order: 1
+                            }
+                        ]
+                    },
+                    plugins: [datalabelsPlugin, htmlLegendPlugin],
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        label += context.parsed.y.toLocaleString('es-ES');
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: periodoType === 'Sem' ? 'SEMANAS' : 'MESES',
+                                    font: { weight: 'bold' }
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Peso (Kg)',
+                                    font: { weight: 'bold' }
+                                },
+                                ticks: {
+                                    callback: function(value) {
+                                        return value.toLocaleString('es-ES');
+                                    }
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Rollos',
+                                    font: { weight: 'bold' }
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                },
+                                ticks: {
+                                    callback: function(value) {
+                                        return value.toLocaleString('es-ES');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                return () => {
+                    if (chartInstance.current) {
+                        chartInstance.current.destroy();
+                    }
+                };
+            }, [data, periodoType]);
+
+            return <canvas ref={chartRef}></canvas>;
+        }
+
+        // Renderizar la aplicación
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reporte de Control y Trazabilidad</title>
+    
+    <!-- 1. Estilos: Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2. Motor de React y Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- 3. Librería para leer Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <!-- Estilos de impresión y fuente -->
+    <style>
+        /* Fuente Arial global como en Excel */
+        body { font-family: Arial, sans-serif; }
+
+        /* Ocultar spinners (flechas arriba/abajo) en inputs tipo number */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;            appearance: textfield;        }
+
+        @media print {
+            /* Orientación Vertical (Portrait) con margen superior de 1.5cm */
+            /* Orden: Top Right Bottom Left */
+            @page { size: portrait; margin: 1.5cm 3mm 5mm 3mm; }
+            
+            body { 
+                background: white; 
+                -webkit-print-color-adjust: exact; 
+                print-color-adjust: exact; 
+                font-size: 9pt; 
+            }
+            
+            /* Ajustes para ocultar interfaz y sombras */
+            .print\:hidden { display: none !important; }
+            .print\:shadow-none { box-shadow: none !important; }
+            .no-break { page-break-inside: avoid; }
+            .print\:w-full { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }
+            
+            /* Forzar que la tabla use el 100% y tenga letra ajustada */
+            table { width: 100% !important; border-collapse: collapse; }
+            
+            /* AJUSTE CLAVE: Reducir padding vertical a 0 y apretar el interlineado */
+            th, td { 
+                padding: 0px 1px !important; 
+                line-height: 1.1 !important; 
+                height: auto !important;
+            }
+            
+            /* Bordes finos */
+            .border { border-width: 1px !important; }
+        }
+
+        /* Rotación de texto en encabezados verticales */
+        .vertical-text {
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+            white-space: nowrap;
+        }
+
+        /* Aumentar fuente de la tabla en la vista HTML (no impresión) */
+        @media screen {
+            .report-table th, .report-table td {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-sm">
+    <div id="root"></div>
+
+    <!-- Botón flotante volver al menú principal -->
+    <a href="index.html" title="Volver al menú principal" style="position:fixed;right:18px;top:18px;width:50px;height:50px;border-radius:50%;background:#001a54;color:#fff;display:flex;align-items:center;justify-content:center;z-index:1100;box-shadow:0 6px 20px rgba(0,0,0,.18);text-decoration:none;font-size:22px;transition:background .2s" onmouseover="this.style.background='#1a3a7a'" onmouseout="this.style.background='#001a54'">&#8592;</a>
+
+    <!-- Modal de carga (fuera de React para mejor control) -->
+    <div id="loading-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 text-center">
+            <div id="modal-spinner" class="mb-6 relative">
+                <div class="inline-block animate-spin rounded-full h-16 w-16 border-4 border-green-200 border-t-green-600"></div>
+                <div id="modal-timer" class="absolute inset-0 flex items-center justify-center">
+                    <span class="text-lg font-bold text-green-600">--</span>
+                </div>
+            </div>
+            <h3 id="modal-title" class="text-xl font-bold text-gray-800 mb-2">Buscando Partidas...</h3>
+            <p id="modal-message" class="text-gray-600 mb-4">Realizando búsqueda optimizada en la base de datos</p>
+            <div class="bg-gray-100 rounded-lg p-3 mb-4">
+                <p id="modal-status" class="text-sm text-gray-500">Consultando...</p>
+            </div>
+            <p id="modal-time-remaining" class="text-xs text-gray-400 mb-4 hidden">Tiempo estimado: <span id="time-text">--</span></p>
+            <button id="modal-close-btn" onclick="document.getElementById('loading-modal').classList.add('hidden'); document.getElementById('modal-spinner').classList.remove('hidden'); document.getElementById('modal-close-btn').classList.add('hidden'); stopModalTimer();" class="hidden bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-6 rounded-lg transition-colors">
+                Cerrar
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Timer global para el modal
+        let modalTimerInterval = null;
+        let modalTimeRemaining = 0;
+
+        function startModalTimer(estimatedSeconds) {
+            stopModalTimer(); // Limpiar cualquier timer anterior
+            modalTimeRemaining = estimatedSeconds;
+            
+            const timerEl = document.getElementById('modal-timer').querySelector('span');
+            const timeRemainingEl = document.getElementById('modal-time-remaining');
+            const timeTextEl = document.getElementById('time-text');
+            
+            timeRemainingEl.classList.remove('hidden');
+            
+            const updateDisplay = () => {
+                if (modalTimeRemaining > 0) {
+                    timerEl.textContent = modalTimeRemaining + 's';
+                    timeTextEl.textContent = modalTimeRemaining + ' segundos';
+                } else {
+                    timerEl.textContent = '...';
+                    timeTextEl.textContent = 'finalizando...';
+                }
+            };
+            
+            updateDisplay();
+            
+            modalTimerInterval = setInterval(() => {
+                modalTimeRemaining--;
+                updateDisplay();
+                
+                if (modalTimeRemaining < -30) {
+                    // Si pasaron más de 30 segundos del estimado, mostrar mensaje
+                    timeTextEl.textContent = 'tomando más de lo esperado...';
+                }
+            }, 1000);
+        }
+
+        function stopModalTimer() {
+            if (modalTimerInterval) {
+                clearInterval(modalTimerInterval);
+                modalTimerInterval = null;
+            }
+            const timerEl = document.getElementById('modal-timer');
+            if (timerEl) {
+                timerEl.querySelector('span').textContent = '✓';
+            }
+            const timeRemainingEl = document.getElementById('modal-time-remaining');
+            if (timeRemainingEl) {
+                timeRemainingEl.classList.add('hidden');
+            }
+        }
+
+        function resetModalTimer() {
+            stopModalTimer();
+            const timerEl = document.getElementById('modal-timer');
+            if (timerEl) {
+                timerEl.querySelector('span').textContent = '--';
+            }
+        }
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // ============================================
+        // CONFIGURACIÓN - PEGAR AQUÍ LA URL DE APPS SCRIPT
+        // ============================================
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_sS4m7Mll4uwpiMHImgvDKtZACt6J653r2fgeUFNSr1q0REGhncQeEW9nYUbrJeJo/exec";
+        // ============================================
+
+        // ============================================
+        // CONFIGURACIÓN - CARGA RÁPIDA JSONP (Google Sheets público)
+        // ============================================
+        const SHEET_ID = "1NVfMymJadfFuV5ROJB9ZamsCkXjM6hVRAz_Yku1ce_w";
+        const SHEET_NAME = "base";
+        // ============================================
+
+        // --- FUNCIONES DE CARGA RÁPIDA JSONP ---
+        const gvizToObjects = (resp) => {
+            if (!resp || !resp.table) return [];
+            const cols = (resp.table.cols || []).map(c => String(c.label || c.id || "").trim());
+            return (resp.table.rows || []).map(r => {
+                const o = {};
+                cols.forEach((h, i) => {
+                    const cell = r.c && r.c[i];
+                    o[h] = cell && (cell.v !== null && cell.v !== undefined) ? cell.v : "";
+                });
+                return o;
+            });
+        };
+
+        const loadSheetJSONP = (sheetId, sheetName) => {
+            const TIMEOUT_MS = 15000;
+            return new Promise((resolve, reject) => {
+                const cbName = "GVIZ_CB_" + Math.random().toString(36).slice(2);
+                let script = document.createElement("script");
+                let timer = null;
+
+                function cleanup() {
+                    if (timer) clearTimeout(timer);
+                    if (script && script.parentNode) script.parentNode.removeChild(script);
+                    if (window[cbName]) delete window[cbName];
+                }
+
+                timer = setTimeout(() => {
+                    cleanup();
+                    reject(new Error(`Tiempo de espera agotado al cargar "${sheetName}".`));
+                }, TIMEOUT_MS);
+
+                window[cbName] = function(resp) {
+                    cleanup();
+                    if (resp && resp.status === "error") {
+                        reject(new Error(resp.errors?.[0]?.detailed_message || "Error al cargar datos."));
+                    } else {
+                        resolve(gvizToObjects(resp));
+                    }
+                };
+
+                const base = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq`;
+                const url = `${base}?sheet=${encodeURIComponent(sheetName)}&headers=2&tq=${encodeURIComponent("select *")}&tqx=out:json;responseHandler:${cbName}&nocache=${Date.now()}`;
+
+                script.src = url;
+                document.head.appendChild(script);
+            });
+        };
+
+        // Variable global para almacenar todos los datos cargados via JSONP
+        let allSheetData = null;
+        let isLoadingAllData = false;
+
+        // Cargar todos los datos al inicio (JSONP rápido)
+        const loadAllDataFast = async () => {
+            if (allSheetData) return allSheetData;
+            if (isLoadingAllData) {
+                // Esperar a que termine la carga en progreso
+                while (isLoadingAllData) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                return allSheetData;
+            }
+            
+            isLoadingAllData = true;
+            try {
+                if (SHEET_ID && SHEET_ID.length > 10) {
+                    console.log('[JSONP] Cargando todos los datos...');
+                    const data = await loadSheetJSONP(SHEET_ID, SHEET_NAME);
+                    if (data && data.length > 0) {
+                        console.log(`[JSONP] ✓ ${data.length} registros cargados`);
+                        // DEBUG: Mostrar columnas originales del primer registro
+                        if (data[0]) {
+                            console.log('[DEBUG] Columnas originales del sheet:', Object.keys(data[0]));
+                        }
+                        // Normalizar nombres de columnas (quitar "Suma de " de los defectos)
+                        allSheetData = data.map(row => normalizeColumnNames(row));
+                        // DEBUG: Mostrar columnas normalizadas
+                        if (allSheetData[0]) {
+                            console.log('[DEBUG] Columnas normalizadas:', Object.keys(allSheetData[0]));
+                        }
+                        console.log('[JSONP] Columnas normalizadas (sin prefijo "Suma de")');
+                        return allSheetData;
+                    }
+                }
+            } catch (err) {
+                console.log('[JSONP] Falló:', err.message);
+            } finally {
+                isLoadingAllData = false;
+            }
+            return null;
+        };
+
+        // Obtener partidas de los datos ya cargados
+        const getPartidasFromCache = (op) => {
+            if (!allSheetData || !op) return null;
+            const opTrimmed = String(op).trim();
+            const partidasSet = new Set();
+            allSheetData.forEach(row => {
+                const rowOP = String(row.OP || "").trim();
+                if (rowOP === opTrimmed) {
+                    const partida = String(row.Partida || "").trim();
+                    if (partida) partidasSet.add(partida);
+                }
+            });
+            return Array.from(partidasSet).sort((a, b) => Number(a) - Number(b));
+        };
+
+        // Obtener datos filtrados por OP y partida de los datos ya cargados
+        const getDataFromCache = (op, partida) => {
+            if (!allSheetData || !op || !partida) return null;
+            const opTrimmed = String(op).trim();
+            const partidaTrimmed = String(partida).trim();
+            return allSheetData.filter(row => {
+                const rowOP = String(row.OP || "").trim();
+                const rowPartida = String(row.Partida || "").trim();
+                return rowOP === opTrimmed && rowPartida === partidaTrimmed;
+            });
+        };
+
+        // ============================================
+        // CACHÉ LOCAL OPTIMIZADO (10 minutos)
+        // ============================================
+        class LocalCache {
+            constructor(duration = 600000) {
+                this.cache = new Map();
+                this.duration = duration;
+            }
+            
+            get(key) {
+                const item = this.cache.get(key);
+                if (!item) return null;
+                
+                if (Date.now() - item.timestamp > this.duration) {
+                    this.cache.delete(key);
+                    return null;
+                }
+                
+                return item.data;
+            }
+            
+            set(key, data) {
+                this.cache.set(key, {
+                    data: data,
+                    timestamp: Date.now()
+                });
+            }
+            
+            clear() {
+                this.cache.clear();
+            }
+            
+            // Limpiar solo claves que coincidan con un patrón
+            clearPattern(pattern) {
+                for (const key of this.cache.keys()) {
+                    if (key.includes(pattern)) {
+                        this.cache.delete(key);
+                    }
+                }
+            }
+        }
+        
+        const clientCache = new LocalCache(600000); // 10 minutos
+
+        // --- FUNCIONES DEL MODAL DE CARGA ---
+        const showLoadingModal = (title, message, status, estimatedSeconds = 0) => {
+            document.getElementById('modal-spinner').classList.remove('hidden');
+            document.getElementById('modal-close-btn').classList.add('hidden');
+            document.getElementById('modal-title').textContent = title || 'Sincronizando datos...';
+            document.getElementById('modal-message').textContent = message || 'Por favor espere...';
+            document.getElementById('modal-status').textContent = status || 'Procesando...';
+            document.getElementById('loading-modal').classList.remove('hidden');
+            
+            if (estimatedSeconds > 0) {
+                startModalTimer(estimatedSeconds);
+            } else {
+                resetModalTimer();
+            }
+        };
+
+        const updateModalStatus = (status) => {
+            document.getElementById('modal-status').textContent = status;
+        };
+
+        const hideLoadingModal = () => {
+            stopModalTimer();
+            document.getElementById('loading-modal').classList.add('hidden');
+        };
+
+        const showModalSuccess = (message, details) => {
+            stopModalTimer();
+            document.getElementById('modal-title').textContent = '✅ ¡Completado!';
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal-status').textContent = details;
+            setTimeout(hideLoadingModal, 3000);
+        };
+
+        const showModalError = (message, details) => {
+            stopModalTimer();
+            document.getElementById('modal-spinner').classList.add('hidden');
+            document.getElementById('modal-title').textContent = '❌ Error';
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('modal-status').textContent = details || 'Intente nuevamente';
+            document.getElementById('modal-close-btn').classList.remove('hidden');
+            document.getElementById('loading-modal').classList.remove('hidden');
+        };
+
+        // --- FUNCIÓN PARA SINCRONIZAR CON GOOGLE SHEETS ---
+        const syncWithGoogleSheet = async (rows) => {
+            if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("PEGAR_AQUI")) {
+                throw new Error("Configure la URL de Apps Script en el código");
+            }
+
+            const response = await fetch(APPS_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors', // Apps Script requiere no-cors
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ rows: rows })
+            });
+
+            // Con no-cors no podemos leer la respuesta, asumimos éxito si no hay error
+            return { success: true, message: "Datos enviados al servidor" };
+        };
+
+        // Función para obtener partidas de Google Sheets por OP - OPTIMIZADA
+        const fetchPartidasFromSheet = async (op, retries = 3) => {
+            if (!op || !APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("PEGAR_AQUI")) {
+                return null;
+            }
+
+            // Verificar caché local primero (pero ignorar si tiene 0 registros)
+            const cacheKey = `partidas_${op}`;
+            const cached = clientCache.get(cacheKey);
+            if (cached && cached.length > 0) {
+                updateModalStatus(`✓ Partidas obtenidas del caché local`);
+                return cached;
+            } else if (cached && cached.length === 0) {
+                console.log('[Cache] ⚠ Caché vacío de partidas, reconsultando...');
+                clientCache.clearPattern(`partidas_${op}`);
+            }
+
+            try {
+                updateModalStatus(`Buscando partidas para OP ${op}...`);
+                
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 30000); // 30 segundos timeout
+                
+                const response = await fetch(
+                    APPS_SCRIPT_URL + "?action=getPartidas&op=" + encodeURIComponent(op),
+                    { signal: controller.signal }
+                );
+                
+                clearTimeout(timeout);
+                
+                const result = await response.json();
+                if (result.success && result.partidas) {
+                    // Guardar en caché local
+                    clientCache.set(cacheKey, result.partidas);
+                    updateModalStatus(`✓ ${result.partidas.length} partida(s) encontrada(s)`);
+                    return result.partidas;
+                }
+            } catch (error) {
+                console.log("Error obteniendo partidas:", error);
+                
+                if (retries > 0 && error.name !== 'AbortError') {
+                    console.log(`Reintentando... (${retries} intentos restantes)`);
+                    updateModalStatus(`Reintentando búsqueda... (${retries})`);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    return fetchPartidasFromSheet(op, retries - 1);
+                }
+                
+                if (error.name === 'AbortError') {
+                    updateModalStatus(`⚠ Tiempo de espera agotado`);
+                } else {
+                    updateModalStatus(`⚠ No se pudo conectar con el servidor`);
+                }
+            }
+            return null;
+        };
+
+        // Función para obtener datos completos de una OP y Partida - OPTIMIZADA
+        const fetchDataFromSheet = async (op, partida, retries = 3) => {
+            if (!op || !partida || !APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("PEGAR_AQUI")) {
+                return null;
+            }
+
+            // Verificar caché local primero (pero ignorar si tiene 0 registros)
+            const cacheKey = `data_${op}_${partida}`;
+            const cached = clientCache.get(cacheKey);
+            if (cached && cached.length > 0) {
+                updateModalStatus(`✓ ${cached.length} registro(s) cargado(s) desde caché local`);
+                return cached;
+            } else if (cached && cached.length === 0) {
+                console.log('[Cache] ⚠ Caché vacío de datos, reconsultando...');
+                clientCache.clearPattern(`data_${op}`);
+            }
+
+            try {
+                updateModalStatus(`Cargando datos para OP ${op} Partida ${partida}...`);
+                
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 45000); // 45 segundos para datos
+                
+                const response = await fetch(
+                    APPS_SCRIPT_URL + "?action=getData&op=" + encodeURIComponent(op) + "&partida=" + encodeURIComponent(partida),
+                    { signal: controller.signal }
+                );
+                
+                clearTimeout(timeout);
+                
+                const result = await response.json();
+                if (result.success && result.data) {
+                    // Normalizar columnas (quitar "Suma de ") y guardar en caché local
+                    const normalizedData = result.data.map(row => normalizeColumnNames(row));
+                    clientCache.set(cacheKey, normalizedData);
+                    updateModalStatus(`✓ ${normalizedData.length} registro(s) cargado(s)`);
+                    return normalizedData;
+                }
+            } catch (error) {
+                console.log("Error obteniendo datos:", error);
+                
+                if (retries > 0 && error.name !== 'AbortError') {
+                    console.log(`Reintentando... (${retries} intentos restantes)`);
+                    updateModalStatus(`Reintentando carga... (${retries})`);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    return fetchDataFromSheet(op, partida, retries - 1);
+                }
+                
+                if (error.name === 'AbortError') {
+                    updateModalStatus(`⚠ Tiempo de espera agotado`);
+                } else {
+                    updateModalStatus(`⚠ No se pudo conectar con el servidor`);
+                }
+            }
+            return null;
+        };
+
+        // --- ICONOS SVG ---
+        const IconUpload = () => (<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>);
+        const IconFileSpreadsheet = () => (<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-green-600"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h2"/><path d="M8 17h2"/><path d="M14 13h2"/><path d="M14 17h2"/></svg>);
+        const IconPrinter = () => (<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>);
+        const IconSearch = () => (<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-20"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>);
+        const IconSearchSmall = () => (<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>);
+
+        // --- FUNCIÓN PARA NORMALIZAR COLUMNAS (quitar prefijos numéricos y "Suma de ") ---
+        const normalizeColumnNames = (row) => {
+            const normalized = {};
+            Object.keys(row).forEach(key => {
+                let cleanKey = key;
+                // 1. Quitar prefijo "Suma de " si existe
+                cleanKey = cleanKey.replace(/^Suma de /i, '');
+                // 2. Quitar prefijos numéricos como "1.1 ", "2.10.2 ", "2 ", etc.
+                cleanKey = cleanKey.replace(/^[\d.]+\s+/, '');
+                normalized[cleanKey] = row[key];
+            });
+            return normalized;
+        };
+
+        // --- COLUMNAS DE DEFECTOS ---
+        const DEFECT_COLUMNS = [
+            "Gotas Aceite Dispersas", "Hilo Barrado", "Hilo Jaspeado", "Malla Caida/Fuga", "Hilo Tensionado",
+            "Hueco Con Cordon", "Lineas De Aceite", "Cont. Por Ambiente", "Lineas Verticales De Aguja",
+            "Malla Rota", "Malla Retinada", "Anillado", "Rotura De Aguja", "Parada De Maquina",
+            "Jaladuras", "Quebradura en el Doblez", "Qebraduras", "Marca De Doblez", "Suciedad En Doblez",
+            "Hilo Doble", "Falla De Raport", "Falla De Lycra a lo Ancho", "Escapes De Lycra", "Falla De Lycra",
+            "Caida De Tela", "Empalme", "Cascarillas", "Hilo Sucio", "Contaminación De Hilado",
+            "Hilo Irregular", "Cordon"
+        ];
+
+        // --- DATOS DE EJEMPLO ---
+        const DEMO_DATA = [
+            { "Año": 2025, "Mes": "Ago", "OP": "39404", "Partida": "9", "Rollo": 1720, "Cod. Art.": "29598", "Descripción": "JERSEY 40/1 VI COP ORG...", "Color": "BLACK", "Peso": 20.95, "Máquina": "JMO-015", "Hueco Con Cordon": 2, "Malla Rota": 4 },
+            { "Año": 2025, "Mes": "Ago", "OP": "39404", "Partida": "9", "Rollo": 1698, "Cod. Art.": "29598", "Descripción": "JERSEY 40/1 VI COP ORG...", "Color": "BLACK", "Peso": 21.4, "Máquina": "JMO-015", "Cordon": 1, "Hilo Irregular": 1 },
+            { "Año": 2025, "Mes": "Ago", "OP": "39404", "Partida": "2", "Rollo": 867, "Cod. Art.": "29598", "Descripción": "JERSEY...", "Color": "BLACK", "Peso": 9.4, "Máquina": "JM-013", "Hueco Con Cordon": 3, "Rotura De Aguja": 1 },
+            { "Año": 2025, "Mes": "Ago", "OP": "39404", "Partida": "2", "Rollo": 868, "Cod. Art.": "29598", "Descripción": "JERSEY...", "Color": "BLACK", "Peso": 20.75, "Máquina": "JM-013", "Hueco Con Cordon": 3, "Falla De Lycra": 1, "Escapes De Lycra": 1 },
+            { "Año": 2025, "Mes": "Ago", "OP": "39404", "Partida": "2", "Rollo": 869, "Cod. Art.": "OTRO-ART", "Descripción": "JERSEY CON OTRO TIPO DE HILO...", "Color": "BLACK", "Peso": 2.5, "Máquina": "JM-014", "Hueco Con Cordon": 1, "Cordon": 2 }
+        ];
+
+        function App() {
+            const [data, setData] = useState([]);
+            const [fileName, setFileName] = useState("");
+            
+            const [selectedOP, setSelectedOP] = useState("");
+            const [selectedPartida, setSelectedPartida] = useState("");
+            
+            const [availableOPs, setAvailableOPs] = useState([]);
+            const [availablePartidas, setAvailablePartidas] = useState([]);
+            const [filteredData, setFilteredData] = useState([]);
+            const [isLoading, setIsLoading] = useState(false);
+
+            // Mostrar/ocultar modal cuando isLoading cambia
+            useEffect(() => {
+                if (isLoading) {
+                    showLoadingModal(
+                        "Buscando Partidas...",
+                        "Por favor espere mientras se cargan las partidas desde la base de datos",
+                        "Consultando...",
+                        3 // Tiempo estimado reducido gracias a JSONP
+                    );
+                } else {
+                    hideLoadingModal();
+                }
+            }, [isLoading]);
+
+            // Precargar datos al inicio via JSONP (en segundo plano)
+            useEffect(() => {
+                const preloadData = async () => {
+                    console.log('[Precarga] Iniciando carga en segundo plano...');
+                    await loadAllDataFast();
+                    console.log('[Precarga] Datos listos para consultas rápidas');
+                };
+                preloadData();
+            }, []);
+
+            // Cargar lista de OPs (solo para referencia si hay datos locales)
+            useEffect(() => {
+                if (data && data.length > 0) {
+                    const ops = [...new Set(data.map(item => item.OP ? String(item.OP).trim() : ""))].filter(op => op !== "").sort();
+                    setAvailableOPs(ops);
+                } else {
+                    setAvailableOPs([]);
+                }
+            }, [data]);
+
+            // Actualizar partidas cuando cambia OP - OPTIMIZADO CON JSONP
+            useEffect(() => {
+                // Solo proceder si OP tiene exactamente 5 dígitos
+                if (!selectedOP || selectedOP.length !== 5) {
+                    setAvailablePartidas([]);
+                    setSelectedPartida("");
+                    return;
+                }
+                
+                let isMounted = true;
+                
+                const loadPartidas = async () => {
+                    setIsLoading(true);
+                    const opTrimmed = String(selectedOP).trim();
+                    
+                    try {
+                        // 1. Intentar obtener de datos JSONP cargados (más rápido)
+                        updateModalStatus('Buscando partidas (modo rápido)...');
+                        await loadAllDataFast(); // Asegurar que los datos están cargados
+                        const cachedPartidas = getPartidasFromCache(opTrimmed);
+                        
+                        if (!isMounted) return;
+                        
+                        if (cachedPartidas && cachedPartidas.length > 0) {
+                            console.log(`[JSONP] ✓ ${cachedPartidas.length} partidas encontradas para OP ${opTrimmed}`);
+                            setAvailablePartidas(cachedPartidas);
+                            setSelectedPartida("");
+                            setIsLoading(false);
+                            return;
+                        }
+                        
+                        // 2. Fallback: obtener de Apps Script
+                        console.log('[Apps Script] Intentando buscar partidas...');
+                        const sheetPartidas = await fetchPartidasFromSheet(opTrimmed);
+                        
+                        if (!isMounted) return;
+                        
+                        if (sheetPartidas && sheetPartidas.length > 0) {
+                            const partidas = sheetPartidas.map(p => String(p).trim()).filter(p => p !== "").sort((a, b) => Number(a) - Number(b));
+                            setAvailablePartidas(partidas);
+                            setSelectedPartida("");
+                        } else {
+                            // Fallback a datos locales si existen
+                            const partidasSet = new Set();
+                            for (let item of data) {
+                                const itemOP = String(item.OP || "").trim();
+                                if (itemOP === opTrimmed) {
+                                    const partida = String(item.Partida || "").trim();
+                                    if (partida) partidasSet.add(partida);
+                                }
+                            }
+                            const partidas = Array.from(partidasSet).sort((a, b) => Number(a) - Number(b));
+                            setAvailablePartidas(partidas);
+                            setSelectedPartida("");
+                        }
+                    } catch (error) {
+                        console.error("Error cargando partidas:", error);
+                        if (isMounted) {
+                            setAvailablePartidas([]);
+                        }
+                    } finally {
+                        if (isMounted) {
+                            setIsLoading(false);
+                        }
+                    }
+                };
+                
+                loadPartidas();
+                
+                return () => { isMounted = false; };
+            }, [selectedOP, data]);
+
+            // Cargar datos cuando se selecciona Partida - OPTIMIZADO CON JSONP
+            useEffect(() => {
+                if (!selectedOP || !selectedPartida) {
+                    setFilteredData([]);
+                    return;
+                }
+                
+                let isMounted = true;
+                
+                const loadData = async () => {
+                    setIsLoading(true);
+                    const opTrimmed = String(selectedOP).trim();
+                    const partidaTrimmed = String(selectedPartida).trim();
+                    
+                    try {
+                        // 1. Intentar obtener de datos JSONP cargados (más rápido)
+                        updateModalStatus('Cargando datos (modo rápido)...');
+                        const cachedData = getDataFromCache(opTrimmed, partidaTrimmed);
+                        
+                        if (!isMounted) return;
+                        
+                        if (cachedData && cachedData.length > 0) {
+                            console.log(`[JSONP] ✓ ${cachedData.length} registros encontrados`);
+                            setFilteredData(cachedData);
+                            setIsLoading(false);
+                            return;
+                        }
+                        
+                        // 2. Fallback: obtener de Apps Script
+                        console.log('[Apps Script] Intentando cargar datos...');
+                        const sheetData = await fetchDataFromSheet(opTrimmed, partidaTrimmed);
+                        
+                        if (!isMounted) return;
+                        
+                        if (sheetData && sheetData.length > 0) {
+                            setFilteredData(sheetData);
+                        } else {
+                            // Fallback a datos locales
+                            const filtered = data.filter(item => {
+                                const itemOP = String(item.OP || "").trim();
+                                const itemPartida = String(item.Partida || "").trim();
+                                return itemOP === opTrimmed && itemPartida === partidaTrimmed;
+                            });
+                            setFilteredData(filtered);
+                        }
+                    } catch (error) {
+                        console.error("Error cargando datos:", error);
+                        if (isMounted) {
+                            setFilteredData([]);
+                        }
+                    } finally {
+                        if (isMounted) {
+                            setIsLoading(false);
+                        }
+                    }
+                };
+                
+                loadData();
+                
+                return () => { isMounted = false; };
+            }, [selectedOP, selectedPartida, data]);
+
+            // Agrupar por Código de Artículo para la tabla
+            const groupedData = useMemo(() => {
+                const groups = {};
+                filteredData.forEach(row => {
+                    const codArt = String(row["Cod. Art."] || "SIN CODIGO").trim();
+                    if (!groups[codArt]) groups[codArt] = [];
+                    groups[codArt].push(row);
+                });
+                return groups;
+            }, [filteredData]);
+
+            // Ordenar códigos de artículo por peso total (mayor a menor)
+            const sortedCodArtKeys = useMemo(() => {
+                return Object.keys(groupedData).sort((a, b) => {
+                    const pesoA = groupedData[a].reduce((sum, r) => sum + (Number(r.Peso) || 0), 0);
+                    const pesoB = groupedData[b].reduce((sum, r) => sum + (Number(r.Peso) || 0), 0);
+                    return pesoB - pesoA; // Mayor a menor
+                });
+            }, [groupedData]);
+
+            // Columnas de defectos visibles (ocultar las últimas 2 columnas sin datos)
+            const visibleDefectColumns = useMemo(() => {
+                // Calcular qué columnas tienen datos (al menos un valor > 0)
+                const columnsWithData = new Set();
+                filteredData.forEach(row => {
+                    DEFECT_COLUMNS.forEach(col => {
+                        if (Number(row[col]) > 0) {
+                            columnsWithData.add(col);
+                        }
+                    });
+                });
+                
+                // Encontrar las últimas 2 columnas sin datos (recorriendo desde el final)
+                const emptyColumnsFromEnd = [];
+                for (let i = DEFECT_COLUMNS.length - 1; i >= 0 && emptyColumnsFromEnd.length < 2; i--) {
+                    if (!columnsWithData.has(DEFECT_COLUMNS[i])) {
+                        emptyColumnsFromEnd.push(DEFECT_COLUMNS[i]);
+                    }
+                }
+                
+                // Retornar columnas excluyendo las últimas 2 vacías
+                return DEFECT_COLUMNS.filter(col => !emptyColumnsFromEnd.includes(col));
+            }, [filteredData]);
+
+            // --- Lógica de Encabezado Dinámico ---
+            // 1. Pesos totales por código
+            const codeWeights = useMemo(() => {
+                const weights = {};
+                filteredData.forEach(row => {
+                    const code = String(row["Cod. Art."] || "SIN CODIGO").trim();
+                    const peso = Number(row["Peso"]) || 0;
+                    weights[code] = (weights[code] || 0) + peso;
+                });
+                return weights;
+            }, [filteredData]);
+
+            // 2. Identificar el mayor peso (CUERPO)
+            const mainArtCode = useMemo(() => {
+                let maxCode = "";
+                let maxWeight = -1;
+                Object.entries(codeWeights).forEach(([code, weight]) => {
+                    if (weight > maxWeight) {
+                        maxWeight = weight;
+                        maxCode = code;
+                    }
+                });
+                return maxCode;
+            }, [codeWeights]);
+
+            // 3. Crear items únicos para el encabezado (incluyendo conteo de rollos)
+            const uniqueHeaderItems = useMemo(() => {
+                if (filteredData.length === 0) return [];
+                const itemsMap = new Map();
+                
+                filteredData.forEach(row => {
+                    const code = String(row["Cod. Art."] || "").trim();
+                    const desc = String(row["Descripción"] || "").trim();
+                    const color = String(row["Color"] || "").trim();
+                    const peso = Number(row["Peso"]) || 0;
+                    const key = `${code}|${desc}|${color}`;
+
+                    if (code || desc) {
+                        if (!itemsMap.has(key)) {
+                            itemsMap.set(key, { code, desc, color, totalWeight: 0, rollCount: 0 });
+                        }
+                        const item = itemsMap.get(key);
+                        item.totalWeight += peso;
+                        item.rollCount += 1; // Contar cada rollo
+                    }
+                });
+                
+                const items = Array.from(itemsMap.values());
+                // Ordenar: Cuerpo primero
+                items.sort((a, b) => {
+                    const isMainA = a.code === mainArtCode;
+                    const isMainB = b.code === mainArtCode;
+                    if (isMainA && !isMainB) return -1;
+                    if (!isMainA && isMainB) return 1;
+                    return 0;
+                });
+                return items.length > 0 ? items : [{ code: "---", desc: "---", color: "---", totalWeight: 0, rollCount: 0 }];
+            }, [filteredData, mainArtCode]);
+
+            // Total de rollos sumando todos los items
+            const grandTotalRollCount = uniqueHeaderItems.reduce((acc, item) => acc + item.rollCount, 0);
+
+            const grandTotalHeaderWeight = uniqueHeaderItems.reduce((acc, item) => acc + item.totalWeight, 0);
+
+            // Calcular rango de fechas de auditoría (fecha mínima y máxima combinando columnas Día y Año)
+            const fechaAuditoria = useMemo(() => {
+                if (filteredData.length === 0) return '';
+                
+                const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+                
+                // Mapeo de meses en inglés a número (0-indexed)
+                const mesesEN = {
+                    'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'may': 4, 'jun': 5,
+                    'jul': 6, 'aug': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11
+                };
+                
+                const formatFecha = (date) => {
+                    const d = date.getDate().toString().padStart(2, '0');
+                    const m = meses[date.getMonth()];
+                    const y = date.getFullYear();
+                    return `${d}/${m}/${y}`;
+                };
+                
+                // Función para parsear fecha combinando Día (ej: "11-Jan") con Año (ej: 2026)
+                const parseFechaConAnio = (diaVal, anioVal) => {
+                    if (!diaVal) return null;
+                    
+                    // Obtener el año de la columna Año
+                    let year = parseInt(anioVal, 10);
+                    if (isNaN(year) || year < 2000) {
+                        year = new Date().getFullYear(); // Fallback al año actual
+                    }
+                    
+                    // Si diaVal es string con formato "11-Jan" o "11-Feb"
+                    if (typeof diaVal === 'string') {
+                        // Formato: "dd-Mon" (ej: "11-Jan", "3-Feb")
+                        const match = diaVal.match(/^(\d{1,2})[\/\-]([A-Za-z]{3})$/);
+                        if (match) {
+                            const day = parseInt(match[1], 10);
+                            const monthStr = match[2].toLowerCase();
+                            const month = mesesEN[monthStr];
+                            if (month !== undefined && day >= 1 && day <= 31) {
+                                return new Date(year, month, day);
+                            }
+                        }
+                        
+                        // Formato: "dd/mm" o "dd-mm" (solo día y mes numérico)
+                        const numMatch = diaVal.match(/^(\d{1,2})[\/\-](\d{1,2})$/);
+                        if (numMatch) {
+                            const day = parseInt(numMatch[1], 10);
+                            const month = parseInt(numMatch[2], 10) - 1;
+                            return new Date(year, month, day);
+                        }
+                    }
+                    
+                    // Si es número (día del mes)
+                    if (typeof diaVal === 'number' && diaVal >= 1 && diaVal <= 31) {
+                        // Solo tenemos el día, necesitamos mes de otra columna
+                        return null;
+                    }
+                    
+                    return null;
+                };
+                
+                let minDate = null;
+                let maxDate = null;
+                
+                filteredData.forEach(row => {
+                    const diaVal = row["Día"] || row["Dia"] || row["DIA"] || row["día"];
+                    const anioVal = row["Año"] || row["Ano"] || row["AÑO"] || row["año"];
+                    const fecha = parseFechaConAnio(diaVal, anioVal);
+                    
+                    if (fecha && !isNaN(fecha.getTime())) {
+                        if (!minDate || fecha < minDate) minDate = fecha;
+                        if (!maxDate || fecha > maxDate) maxDate = fecha;
+                    }
+                });
+                
+                if (minDate && maxDate) {
+                    return `Del ${formatFecha(minDate)} al ${formatFecha(maxDate)}`;
+                }
+                return '';
+            }, [filteredData]);
+
+            // Manejo de archivo
+            const handleFileUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                // Resetear el input para permitir cargar el mismo archivo nuevamente
+                e.target.value = '';
+
+                showLoadingModal(
+                    'Cargando archivo...',
+                    'Leyendo datos del Excel',
+                    `Archivo: ${file.name}`,
+                    5 // Tiempo estimado inicial: 5 segundos para leer el archivo
+                );
+
+                const reader = new FileReader();
+                reader.onload = async (evt) => {
+                    try {
+                        updateModalStatus('Procesando archivo Excel...');
+                        
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: 'binary' });
+                        const wsname = wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        
+                        // Los datos comienzan en la fila 3 del Excel (índice 2)
+                        // La fila 2 tiene los encabezados (índice 1)
+                        const rawData = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                        
+                        // Encontrar la fila de encabezados (buscar OP y Partida)
+                        let headerRowIndex = 1; // Por defecto fila 2 (índice 1)
+                        for (let i = 0; i < Math.min(rawData.length, 10); i++) {
+                            const rowStr = JSON.stringify(rawData[i]).toUpperCase();
+                            if (rowStr.includes("OP") && (rowStr.includes("PARTIDA") || rowStr.includes("ROLLO"))) {
+                                headerRowIndex = i;
+                                break;
+                            }
+                        }
+
+                        // Convertir a JSON empezando desde la fila de encabezados
+                        const jsonDataRaw = XLSX.utils.sheet_to_json(ws, { range: headerRowIndex, defval: "" });
+                        
+                        // Obtener el nombre de la columna AA (índice 26) para filtrar filas con "TOTAL"
+                        const headers = rawData[headerRowIndex] || [];
+                        const colAAName = headers[26]; // Columna AA es índice 26
+                        
+                        // Filtrar filas que contengan "TOTAL" en la columna AA
+                        const jsonData = jsonDataRaw.filter(row => {
+                            const cellValue = colAAName ? String(row[colAAName] || '').toUpperCase().trim() : '';
+                            return cellValue !== 'TOTAL';
+                        });
+                        
+                        if (jsonData.length === 0) {
+                            showModalError("No se encontraron datos válidos", "El archivo no contiene datos o el formato es incorrecto");
+                            return;
+                        }
+
+                        // Calcular tiempo estimado basado en cantidad de filas (aprox 1 segundo por cada 500 filas + 5 segundos base)
+                        const estimatedTime = Math.ceil(jsonData.length / 500) + 5;
+                        startModalTimer(estimatedTime);
+                        updateModalStatus(`${jsonData.length} filas encontradas. Sincronizando con la base de datos...`);
+
+                        // Sincronizar con Google Sheets
+                        try {
+                            await syncWithGoogleSheet(jsonData);
+                            
+                            // Normalizar columnas y actualizar datos locales
+                            const normalizedJsonData = jsonData.map(row => normalizeColumnNames(row));
+                            setData(normalizedJsonData);
+                            setFileName(file.name);
+                            setSelectedOP("");
+                            setSelectedPartida("");
+
+                            showModalSuccess(
+                                `Se procesaron ${jsonData.length} filas correctamente`,
+                                'Los datos han sido sincronizados con la base de datos y cargados localmente'
+                            );
+                        } catch (syncError) {
+                            console.error('Error de sincronización:', syncError);
+                            
+                            // Aún así cargar datos localmente (normalizados)
+                            const normalizedJsonData = jsonData.map(row => normalizeColumnNames(row));
+                            setData(normalizedJsonData);
+                            setFileName(file.name);
+                            setSelectedOP("");
+                            setSelectedPartida("");
+                            
+                            if (syncError.message.includes("Configure la URL")) {
+                                showModalError(
+                                    "URL de Apps Script no configurada",
+                                    "Los datos se cargaron localmente. Configure APPS_SCRIPT_URL para sincronizar con la base de datos."
+                                );
+                            } else {
+                                showModalError(
+                                    "Error al sincronizar con la base de datos",
+                                    "Los datos se cargaron localmente pero no se sincronizaron. " + syncError.message
+                                );
+                            }
+                        }
+                        
+                    } catch (error) {
+                        console.error(error);
+                        showModalError("Error al leer el archivo", error.message || "Formato de archivo no válido");
+                    }
+                };
+                
+                reader.onerror = () => {
+                    showModalError("Error al leer el archivo", "No se pudo leer el archivo seleccionado");
+                };
+                
+                reader.readAsBinaryString(file);
+            };
+
+            const calculateGlobalTotals = (columnKey) => {
+                return filteredData.reduce((sum, row) => sum + (Number(row[columnKey]) || 0), 0);
+            };
+
+            const headerInfo = filteredData.length > 0 ? filteredData[0] : {};
+            const generalColor = uniqueHeaderItems.length > 0 
+                ? [...new Set(uniqueHeaderItems.map(i => i.color))].join(" / ") 
+                : (headerInfo.Color || "---");
+
+            return (
+                <div className="min-h-screen">
+                    {/* PANEL DE CONTROL (NO IMPRIMIBLE) */}
+                    <div className="print:hidden bg-white shadow-md border-b border-gray-200 p-6 mb-6">
+                        <div className="max-w-7xl mx-auto space-y-6">
+                            
+                            {/* BLOQUE SUPERIOR FLEX: TÍTULO + FILTROS + BOTONES */}
+                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                                
+                                {/* 1. TÍTULO */}
+                                <div>
+                                    <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                                        <IconFileSpreadsheet />
+                                        Generador de Reporte Trazabilidad
+                                    </h1>
+                                </div>
+
+                                {/* 2. BLOQUE DE BÚSQUEDA CENTRAL */}
+                                <div className="relative bg-gray-50 rounded-lg py-3 pl-20 pr-4 border border-gray-200 flex-1 max-w-xl mx-auto lg:mx-4 flex items-start gap-4 shadow-sm">
+                                    {/* Chip flotante */}
+                                    <div className="absolute -top-3 left-4 bg-white border border-gray-200 text-gray-500 text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full flex items-center gap-1 shadow-sm whitespace-nowrap shrink-0 z-10">
+                                        <IconSearchSmall /> 
+                                        <span>Buscar</span>
+                                    </div>
+                                    
+                                    {/* Campo de texto OP + Select de Partida */}
+                                    <div className="flex gap-3 items-center flex-1 flex-col sm:flex-row">
+                                        <div className="flex flex-col items-start gap-1 flex-1 sm:flex-none w-full sm:w-auto">
+                                            <div className="flex items-center gap-2 w-full">
+                                                <label className="text-xs font-bold text-gray-700 whitespace-nowrap">OP:</label>
+                                                <input 
+                                                    type="number" 
+                                                    inputMode="numeric"
+                                                    value={selectedOP} 
+                                                    onChange={(e) => {
+                                                        let value = e.target.value;
+                                                        // Solo permite números y máximo 5 dígitos
+                                                        if (value === "") {
+                                                            setSelectedOP("");
+                                                        } else if (/^\d{0,5}$/.test(value)) {
+                                                            setSelectedOP(value);
+                                                        }
+                                                    }}
+                                                    onKeyPress={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            e.preventDefault();
+                                                        }
+                                                    }}
+                                                    placeholder="5 dígitos" 
+                                                    min="0"
+                                                    max="99999"
+                                                    maxLength="5"
+                                                    className={`flex-1 rounded-md shadow-sm py-1.5 px-2 text-xs border transition-colors focus:ring-green-500 focus:border-green-500 ${
+                                                        selectedOP && selectedOP.length !== 5 
+                                                            ? 'border-red-300 bg-red-50' 
+                                                            : 'border-gray-300 bg-white'
+                                                    }`}
+                                                />
+                                                {isLoading && <span className="text-xs text-gray-400 animate-pulse">...</span>}
+                                            </div>
+                                            {selectedOP && selectedOP.length !== 5 && (
+                                                <span className="text-[10px] text-red-600">Debe tener 5 dígitos</span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-1 sm:flex-none w-full sm:w-auto">
+                                            <label className="text-xs font-bold text-gray-700 whitespace-nowrap">Partida:</label>
+                                            <select 
+                                                value={selectedPartida} 
+                                                onChange={(e) => setSelectedPartida(e.target.value)} 
+                                                className="flex-1 rounded-md border-gray-300 shadow-sm py-1.5 pl-2 text-xs border bg-white disabled:bg-gray-100 focus:ring-green-500 focus:border-green-500 transition-colors" 
+                                                disabled={!selectedOP || selectedOP.length !== 5 || availablePartidas.length === 0 || isLoading}
+                                            >
+                                                <option value="">{isLoading ? "Cargando..." : "-- Selecciona --"}</option>
+                                                {availablePartidas.map(p => <option key={p} value={p}>{p}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* 3. BOTONES DE ACCIÓN */}
+                                <div className="flex gap-3 justify-end lg:justify-start">
+                                    <label title="Cargar Excel" className="flex items-center justify-center w-12 h-12 bg-blue-50 text-blue-700 rounded-full border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors shadow-sm">
+                                        <IconUpload />
+                                        <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" />
+                                    </label>
+                                    <button title="Imprimir / Guardar PDF" onClick={() => window.print()} disabled={filteredData.length === 0} className={`flex items-center justify-center w-12 h-12 rounded-full text-white transition-colors shadow-sm ${filteredData.length > 0 ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-300 cursor-not-allowed'}`}>
+                                        <IconPrinter />
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    {/* REPORTE IMPRIMIBLE */}
+                    {/* CAMBIO: Eliminado max-w-[210mm] para usar todo el ancho de la pantalla (100% o 95% aprox) */}
+                    <div className="w-full lg:w-[98%] mx-auto bg-white p-4 md:p-8 lg:p-12 shadow-lg print:shadow-none print:w-full print:max-w-none print:p-0 print:m-0 mb-10 overflow-x-auto">
+                        {filteredData.length === 0 ? (
+                            <div className="text-center py-20 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+                                <div className="flex justify-center mb-4"><IconSearch /></div>
+                                <p className="text-lg">
+                                    {isLoading ? "Cargando datos desde la base de datos..." : "Ingresa una OP y selecciona una Partida"}
+                                </p>
+                                <p className="text-sm mt-2">Los datos se cargan directamente del Sheet</p>
+                            </div>
+                        ) : (
+                            <div id="report-area" className="text-black">
+                                
+                                {/* CABECERA ISO (3 Columnas) */}
+                                <table className="w-full border-collapse border border-black mb-4 text-xs font-sans">
+                                    <tbody>
+                                        <tr>
+                                            <td className="border border-black p-2 w-40 text-center align-middle bg-gray-50">
+                                                <div className="w-full h-12 flex items-center justify-center">
+                                                    <img src="https://www.cofaco.com/img/Cofaco_Industries_01.png" alt="Cofaco Industries" style={{maxHeight: '56px', maxWidth: '100%', objectFit: 'contain'}} />
+                                                </div>
+                                            </td>
+                                            <td className="border border-black p-2 text-center align-middle">
+                                                <h1 className="text-base md:text-lg font-bold uppercase leading-tight">CONTROL Y TRAZABILIDAD DE INSPECCION DE CALIDAD TEJIDO -CRUDO</h1>
+                                                <p className="text-[10px] md:text-xs mt-1 text-gray-700 font-semibold">Área encargada: Aseguramiento de Calidad textil</p>
+                                            </td>
+                                            <td className="border border-black p-2 w-40 text-left align-middle text-[10px]">
+                                                <div className="mb-1 border-b border-gray-300 pb-1"><span className="font-bold block">Versión:</span> 01</div>
+                                                <div><span className="font-bold block">F-GT-ACT-22</span> FA: 29/12/2023</div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+
+                                {/* GRID DE DATOS (Cabecera dinámica) */}
+                                <div className="mb-4">
+                                    <table className="w-full text-xs border-collapse border border-black">
+                                        <tbody>
+                                            <tr>
+                                                <th className="border border-black bg-gray-100 p-2 text-left font-bold w-24 align-middle">CLIENTE</th>
+                                                <td className="border border-black p-2 align-middle font-bold">{headerInfo.Cliente || "---"}</td>
+                                                <th className="border border-black bg-gray-100 p-2 text-left font-bold w-16 align-middle">OP</th>
+                                                <td className="border border-black p-2 font-bold text-base align-middle">{selectedOP}</td>
+                                                <th className="border border-black bg-gray-100 p-2 text-left font-bold w-20 align-middle">PARTIDA</th>
+                                                <td className="border border-black p-2 font-bold text-base align-middle">{selectedPartida}</td>
+                                                <th className="border border-black bg-gray-100 p-2 text-left font-bold w-16 align-middle">COLOR</th>
+                                                <td className="border border-black p-2 align-middle font-bold" colSpan={2}>{generalColor}</td>
+                                            </tr>
+                                            
+                                            {uniqueHeaderItems.map((item, idx) => {
+                                                const isMain = item.code === mainArtCode;
+                                                const rowLabel = isMain ? "CUERPO" : "COMPLEMENTO";
+
+                                                return (
+                                                    <tr key={idx}>
+                                                        <th className="border border-black bg-gray-100 p-2 text-left font-bold align-middle">{rowLabel}</th>
+                                                        <td className="border border-black p-2 align-middle font-semibold">{item.code}</td>
+                                                        <td className="border border-black p-2 align-middle" colSpan={3}>{item.desc}</td>
+                                                        <th className="border border-black bg-gray-100 p-2 text-left font-bold align-middle whitespace-nowrap">TOTAL KG</th>
+                                                        <td className="border border-black p-2 align-middle font-bold bg-gray-50">{item.totalWeight.toFixed(2)}</td>
+                                                        <th className="border border-black bg-gray-100 p-2 text-left font-bold align-middle whitespace-nowrap">#ROLLOS</th>
+                                                        <td className="border border-black p-2 align-middle font-bold bg-gray-50 text-center">{item.rollCount}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                            {/* Fila de CATEGORIA, F.AUDITORIA, PESO y TOTAL - siempre visible */}
+                                            {(() => {
+                                                let categoriaVal = '';
+                                                if (filteredData && filteredData.length > 0) {
+                                                    const firstRow = filteredData[0];
+                                                    if (firstRow) {
+                                                        const catKey = Object.keys(firstRow).find(k => k && k.toLowerCase().includes('categoria'));
+                                                        if (catKey) categoriaVal = firstRow[catKey];
+                                                    }
+                                                }
+                                                return (
+                                                    <tr>
+                                                        <th className="border border-black bg-gray-100 p-2 text-left font-bold align-middle">CATEGORIA</th>
+                                                        <td className="border border-black p-2 align-middle font-bold">{categoriaVal ? String(categoriaVal) : '-'}</td>
+                                                        <th className="border border-black bg-gray-100 p-2 text-left font-bold align-middle whitespace-nowrap">F.AUDITORIA</th>
+                                                        <td className="border border-black p-2 align-middle font-semibold text-xs" colSpan={2}>{fechaAuditoria || '-'}</td>
+                                                        <th className="border border-black bg-gray-100 p-2 text-left font-bold align-middle">PESO:</th>
+                                                        <td className="border border-black p-2 align-middle font-bold bg-gray-200 text-base">{grandTotalHeaderWeight.toFixed(2)}</td>
+                                                        <th className="border border-black bg-gray-100 p-2 text-left font-bold align-middle">TOTAL</th>
+                                                        <td className="border border-black p-2 align-middle font-bold bg-gray-200 text-base text-center">{grandTotalRollCount}</td>
+                                                    </tr>
+                                                );
+                                            })()}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {/* TABLA DE DETALLE */}
+                                <div className="overflow-x-auto">
+                                    <table className="report-table w-full border-collapse print:text-[9pt] font-mono whitespace-nowrap">
+                                        <thead>
+                                            <tr className="bg-gray-100 text-center print:bg-gray-200 align-bottom">
+                                                <th className="border border-gray-400 px-1 py-2 font-bold min-w-[50px] print:min-w-0 text-sm print:text-[9pt]">CodArt</th>
+                                                <th className="border border-gray-400 px-1 py-2 font-bold text-sm print:text-[9pt]">Rollo</th>
+                                                <th className="border border-gray-400 px-1 py-2 font-bold text-sm print:text-[9pt]">Peso</th>
+                                                <th className="border border-gray-400 px-1 py-2 font-bold text-sm print:text-[9pt]">Máq.</th>
+                                                {visibleDefectColumns.map((col) => (
+                                                    <th key={col} className="border border-gray-400 px-1 py-2 w-8 print:w-4 h-32 align-bottom">
+                                                        <div className="flex h-full items-end justify-center pb-1">
+                                                            <div className="vertical-text text-xs print:text-[8pt]">{col.replace("Suma de ", "")}</div>
+                                                        </div>
+                                                    </th>
+                                                ))}
+                                                <th className="border border-gray-400 px-1 py-2 bg-gray-200 font-bold min-w-[30px] print:min-w-0 text-sm print:text-[9pt]">TOT</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {sortedCodArtKeys.map((codArt) => {
+                                                const groupRows = groupedData[codArt];
+                                                const groupTotalPeso = groupRows.reduce((sum, r) => sum + (Number(r.Peso) || 0), 0);
+                                                const groupDefectTotals = visibleDefectColumns.reduce((acc, col) => {
+                                                    acc[col] = groupRows.reduce((sum, r) => sum + (Number(r[col]) || 0), 0);
+                                                    return acc;
+                                                }, {});
+                                                const groupGrandTotal = Object.values(groupDefectTotals).reduce((a, b) => a + b, 0);
+
+                                                return (
+                                                    <React.Fragment key={codArt}>
+                                                        {groupRows.map((row, index) => {
+                                                            const rowTotal = visibleDefectColumns.reduce((acc, def) => acc + (Number(row[def]) || 0), 0);
+                                                            const showCodArt = index === 0;
+                                                            return (
+                                                                <tr key={`${codArt}-${index}`} className="text-center hover:bg-gray-50 print:hover:bg-transparent">
+                                                                    <td className="border border-gray-300 px-1 py-1 text-xs print:text-[9pt] font-semibold bg-white align-top">{showCodArt ? codArt : ""}</td>
+                                                                    <td className="border border-gray-300 px-1 py-1 print:text-[9pt]">{row.Rollo}</td>
+                                                                    <td className="border border-gray-300 px-1 py-1 print:text-[9pt]">{Number(row.Peso).toFixed(2)}</td>
+                                                                    <td className="border border-gray-300 px-1 py-1 print:text-[9pt]">{row.Máquina}</td>
+                                                                    {visibleDefectColumns.map((col) => {
+                                                                        const val = Number(row[col]);
+                                                                        return <td key={col} className={`border border-gray-300 px-1 py-1 print:px-[1px] print:text-[9pt] ${val > 0 ? 'bg-red-50 font-bold text-red-600 print:text-black print:font-bold' : 'text-gray-300'}`}>{val > 0 ? val : '-'}</td>;
+                                                                    })}
+                                                                    <td className="border border-gray-300 px-1 py-1 font-bold bg-gray-50 print:text-[9pt]">{rowTotal > 0 ? rowTotal : '-'}</td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                        <tr className="bg-gray-100 font-bold text-center border-t border-b-2 border-gray-400 print:bg-gray-100">
+                                                            <td className="border border-gray-300 px-1 py-1 text-left pl-2 text-xs print:text-[9pt]" colSpan={2}>TOTAL {codArt}</td>
+                                                            <td className="border border-gray-300 px-1 py-1 print:text-[9pt]">{groupTotalPeso.toFixed(2)}</td>
+                                                            <td className="border border-gray-300 px-1 py-1 print:text-[9pt]">-</td>
+                                                            {visibleDefectColumns.map(col => {
+                                                                const val = groupDefectTotals[col];
+                                                                return <td key={`sub-${col}`} className={`border border-gray-300 px-1 py-1 text-xs print:px-[1px] print:text-[9pt] ${val >= 20 ? 'bg-yellow-300 text-black print:bg-yellow-300' : ''}`}>{val > 0 ? val : ''}</td>;
+                                                            })}
+                                                            <td className="border border-gray-300 px-1 py-1 print:text-[9pt]">{groupGrandTotal > 0 ? groupGrandTotal : ''}</td>
+                                                        </tr>
+                                                    </React.Fragment>
+                                                );
+                                            })}
+                                        </tbody>
+                                        <tfoot>
+                                            <tr className="bg-gray-800 text-white font-bold text-center border-t-2 border-black print:bg-gray-300 print:text-black">
+                                                <td className="border border-gray-400 px-1 py-2 print:text-[9pt]" colSpan={2}>TOTAL GENERAL</td>
+                                                <td className="border border-gray-400 px-1 py-2 print:text-[9pt]">{filteredData.reduce((sum, row) => sum + (Number(row.Peso) || 0), 0).toFixed(2)}</td>
+                                                <td className="border border-gray-400 px-1 py-2 print:text-[9pt]">-</td>
+                                                {visibleDefectColumns.map(col => {
+                                                    const val = calculateGlobalTotals(col);
+                                                    return <td key={col} className={`border border-gray-400 px-1 py-2 text-xs print:px-[1px] print:text-[9pt] ${val >= 20 ? 'bg-yellow-300 text-black print:bg-yellow-300' : ''}`}>{val > 0 ? val : ''}</td>;
+                                                })}
+                                                <td className="border border-gray-400 px-1 py-2 print:text-[9pt]">{filteredData.reduce((grandSum, row) => grandSum + visibleDefectColumns.reduce((rowSum, col) => rowSum + (Number(row[col]) || 0), 0), 0)}</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                                
+                                
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
