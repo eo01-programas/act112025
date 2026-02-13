@@ -715,6 +715,7 @@
             const [startDate, setStartDate] = useState('');
             const [endDate, setEndDate] = useState('');
             const [opInput, setOpInput] = useState('');
+            const [partidaFilter, setPartidaFilter] = useState('');
             
             // Estado de datos
             const [rawData, setRawData] = useState([]);
@@ -725,6 +726,21 @@
             // Estado de filtros secundarios
             const [selectedGroup, setSelectedGroup] = useState(null);
             const [selectedMachine, setSelectedMachine] = useState(null);
+
+            // Obtener partidas únicas para la OP seleccionada
+            const availablePartidas = useMemo(() => {
+                if (filterType !== 'op' || !opInput.trim() || !allDataCache || allDataCache.length === 0) return [];
+                const opSearch = opInput.trim();
+                const partidas = new Set();
+                allDataCache.forEach(row => {
+                    const rowOP = String(row['OP'] || '').trim();
+                    if (rowOP === opSearch) {
+                        const partida = String(row['Partida'] || '').trim();
+                        if (partida) partidas.add(partida);
+                    }
+                });
+                return Array.from(partidas).sort();
+            }, [filterType, opInput, allDataCache]);
 
             // Obtener grupos únicos de los datos
             const availableGroups = useMemo(() => {
@@ -1046,6 +1062,14 @@
                                 return rowOP === opSearch;
                             });
                             
+                            // Filtrar por Partida si se seleccionó una
+                            if (partidaFilter) {
+                                data = data.filter(row => {
+                                    const rowPartida = String(row['Partida'] || '').trim();
+                                    return rowPartida === partidaFilter;
+                                });
+                            }
+                            
                             console.log(`Búsqueda OP ${opSearch}: encontrados ${data.length} de ${sourceData.length} registros`);
                             if (data.length > 0) {
                                 console.log('Primera fila encontrada:', data[0]);
@@ -1113,7 +1137,7 @@
                         hideLoadingModal();
                     }, 1000);
                 }
-            }, [filterType, startDate, endDate, opInput, allDataCache]);
+            }, [filterType, startDate, endDate, opInput, partidaFilter, allDataCache]);
 
             // Manejar cambio de grupo
             const handleGroupClick = (group) => {
@@ -1387,11 +1411,27 @@
                                                 // Permitir solo números
                                                 const val = e.target.value.replace(/\D/g, '');
                                                 setOpInput(val);
+                                                setPartidaFilter('');
                                             }}
                                             placeholder="Ej: 40768"
                                             maxLength={10}
                                             className="w-28 px-2 py-1.5 border border-gray-300 rounded-md text-xs text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                         />
+                                        {availablePartidas.length > 0 && (
+                                            <>
+                                                <label className="text-sm font-medium text-gray-700">Partida</label>
+                                                <select
+                                                    value={partidaFilter}
+                                                    onChange={(e) => setPartidaFilter(e.target.value)}
+                                                    className="px-2 py-1.5 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                >
+                                                    <option value="">Todas</option>
+                                                    {availablePartidas.map(p => (
+                                                        <option key={p} value={p}>{p}</option>
+                                                    ))}
+                                                </select>
+                                            </>
+                                        )}
                                     </div>
                                 )}
 
