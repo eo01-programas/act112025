@@ -80,9 +80,6 @@
 <body class="bg-gray-100 text-sm">
     <div id="root"></div>
 
-    <!-- Botón flotante volver al menú principal -->
-    <a href="index.html" title="Volver al menú principal" style="position:fixed;right:18px;top:18px;width:50px;height:50px;border-radius:50%;background:#001a54;color:#fff;display:flex;align-items:center;justify-content:center;z-index:1100;box-shadow:0 6px 20px rgba(0,0,0,.18);text-decoration:none;font-size:22px;transition:background .2s" onmouseover="this.style.background='#1a3a7a'" onmouseout="this.style.background='#001a54'">&#8592;</a>
-
     <!-- Modal de carga (fuera de React para mejor control) -->
     <div id="loading-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
         <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 text-center">
@@ -850,6 +847,42 @@
 
             const grandTotalHeaderWeight = uniqueHeaderItems.reduce((acc, item) => acc + item.totalWeight, 0);
 
+            // Información de lotes por artículo (Tipo, Lote de Hilo, Lote de Lycra, Cod. Art., Descripción)
+            const lotInfoData = useMemo(() => {
+                if (filteredData.length === 0) return [];
+                const itemsMap = new Map();
+                
+                // Buscar columnas de lote de forma flexible
+                const findCol = (row, ...patterns) => {
+                    for (const pat of patterns) {
+                        const key = Object.keys(row).find(k => k.toLowerCase().replace(/[\s_.-]+/g, '').includes(pat.toLowerCase().replace(/[\s_.-]+/g, '')));
+                        if (key && row[key] !== '' && row[key] !== undefined && row[key] !== null) return String(row[key]).trim();
+                    }
+                    return '';
+                };
+                
+                filteredData.forEach(row => {
+                    const code = String(row["Cod. Art."] || "").trim();
+                    if (!code) return;
+                    if (itemsMap.has(code)) return;
+                    
+                    const desc = String(row["Descripción"] || row["Descripcion"] || "").trim();
+                    const loteHilo = findCol(row, 'LotedeHilo', 'Lote de Hilo', 'LoteHilo', 'Lote Hilo');
+                    const loteLycra = findCol(row, 'LotedeLycra', 'Lote de Lycra', 'LoteLycra', 'Lote Lycra');
+                    const isMain = code === mainArtCode;
+                    const tipo = isMain ? 'CUERPO' : 'COMPLEMENTO';
+                    
+                    itemsMap.set(code, { tipo, loteHilo, loteLycra, code, desc });
+                });
+                
+                // Ordenar: CUERPO primero
+                return Array.from(itemsMap.values()).sort((a, b) => {
+                    if (a.tipo === 'CUERPO' && b.tipo !== 'CUERPO') return -1;
+                    if (a.tipo !== 'CUERPO' && b.tipo === 'CUERPO') return 1;
+                    return 0;
+                });
+            }, [filteredData, mainArtCode]);
+
             // Calcular rango de fechas de auditoría (fecha mínima y máxima combinando columnas Día y Año)
             const fechaAuditoria = useMemo(() => {
                 if (filteredData.length === 0) return '';
@@ -1140,6 +1173,7 @@
                                     <button title="Imprimir / Guardar PDF" onClick={() => window.print()} disabled={filteredData.length === 0} className={`flex items-center justify-center w-12 h-12 rounded-full text-white transition-colors shadow-sm ${filteredData.length > 0 ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-300 cursor-not-allowed'}`}>
                                         <IconPrinter />
                                     </button>
+                                    <a href="index.html" title="Volver al menú principal" className="flex items-center justify-center w-12 h-12 bg-[#001a54] text-white rounded-full hover:bg-[#1a3a7a] transition-colors shadow-sm" style={{textDecoration:'none',fontSize:'20px'}}>&#8592;</a>
                                 </div>
                             </div>
 
@@ -1183,7 +1217,7 @@
 
                                 {/* GRID DE DATOS (Cabecera dinámica) */}
                                 <div className="mb-4">
-                                    <table className="w-full text-xs border-collapse border border-black">
+                                    <table className="w-full border-collapse border border-black" style={{fontSize:'10px'}}>
                                         <tbody>
                                             <tr>
                                                 <th className="border border-black bg-gray-100 p-2 text-left font-bold w-24 align-middle">CLIENTE</th>
@@ -1194,6 +1228,12 @@
                                                 <td className="border border-black p-2 font-bold text-base align-middle">{selectedPartida}</td>
                                                 <th className="border border-black bg-gray-100 p-2 text-left font-bold w-16 align-middle">COLOR</th>
                                                 <td className="border border-black p-2 align-middle font-bold" colSpan={2}>{generalColor}</td>
+                                            </tr>
+                                            <tr>
+                                                <th className="border border-black bg-gray-100 p-2 text-left font-bold align-middle"></th>
+                                                <td className="border border-black p-2 align-middle font-bold">Cod.Art.</td>
+                                                <td className="border border-black p-2 align-middle font-bold" colSpan={3}>Descripción</td>
+                                                <td className="border border-black p-2" colSpan={4}></td>
                                             </tr>
                                             
                                             {uniqueHeaderItems.map((item, idx) => {
@@ -1260,7 +1300,7 @@
                                         </thead>
                                         <tbody>
                                             {sortedCodArtKeys.map((codArt) => {
-                                                const groupRows = groupedData[codArt];
+                                                const groupRows = [...groupedData[codArt]].sort((a, b) => (Number(a.Rollo) || 0) - (Number(b.Rollo) || 0));
                                                 const groupTotalPeso = groupRows.reduce((sum, r) => sum + (Number(r.Peso) || 0), 0);
                                                 const groupDefectTotals = visibleDefectColumns.reduce((acc, col) => {
                                                     acc[col] = groupRows.reduce((sum, r) => sum + (Number(r[col]) || 0), 0);
@@ -1315,7 +1355,34 @@
                                         </tfoot>
                                     </table>
                                 </div>
-                                
+
+                                {/* BLOQUE DE INFORMACIÓN DE LOTES */}
+                                {lotInfoData.length > 0 && (
+                                    <div className="mt-4 border border-gray-300 rounded-lg p-3">
+                                        <table className="text-xs">
+                                            <thead>
+                                                <tr className="bg-gray-100">
+                                                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold">Tipo</th>
+                                                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold">Lote de Hilo</th>
+                                                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold">Lote de Lycra</th>
+                                                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold">Cod. Art.</th>
+                                                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold">Descripción</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {lotInfoData.map((item, idx) => (
+                                                    <tr key={idx} className="hover:bg-gray-50">
+                                                        <td className="border border-gray-300 px-3 py-1 font-semibold">{item.tipo}</td>
+                                                        <td className="border border-gray-300 px-3 py-1">{item.loteHilo || '-'}</td>
+                                                        <td className="border border-gray-300 px-3 py-1">{item.loteLycra || '-'}</td>
+                                                        <td className="border border-gray-300 px-3 py-1 font-semibold">{item.code}</td>
+                                                        <td className="border border-gray-300 px-3 py-1">{item.desc}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
                                 
                             </div>
                         )}
