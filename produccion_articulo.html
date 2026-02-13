@@ -695,12 +695,28 @@
             const [startDate, setStartDate] = useState('');
             const [endDate, setEndDate] = useState('');
             const [opInput, setOpInput] = useState('');
+            const [partidaFilter, setPartidaFilter] = useState('');
             
             // Estado de datos
             const [rawData, setRawData] = useState([]);
             const [allDataCache, setAllDataCache] = useState([]); // Cache de todos los datos
             const [isLoading, setIsLoading] = useState(false);
             const [dataLoaded, setDataLoaded] = useState(false);
+
+            // Obtener partidas únicas para la OP seleccionada
+            const availablePartidas = useMemo(() => {
+                if (filterType !== 'op' || !opInput.trim() || !allDataCache || allDataCache.length === 0) return [];
+                const opSearch = opInput.trim();
+                const partidas = new Set();
+                allDataCache.forEach(row => {
+                    const rowOP = String(row['OP'] || '').trim();
+                    if (rowOP === opSearch) {
+                        const partida = String(row['Partida'] || '').trim();
+                        if (partida) partidas.add(partida);
+                    }
+                });
+                return Array.from(partidas).sort();
+            }, [filterType, opInput, allDataCache]);
 
             // Calcular producción por artículo
             const productionByArticle = useMemo(() => {
@@ -975,6 +991,15 @@
                         const result = await response.json();
                         if (result.success && result.data) {
                             data = result.data;
+                            
+                            // Filtrar por Partida si se seleccionó una
+                            if (partidaFilter) {
+                                data = data.filter(row => {
+                                    const rowPartida = String(row['Partida'] || '').trim();
+                                    return rowPartida === partidaFilter;
+                                });
+                            }
+                            
                             updateModalStatus(`✓ ${data.length} registros encontrados para OP ${opInput}`);
                         }
                     } else {
@@ -1019,7 +1044,7 @@
                         hideLoadingModal();
                     }, 1000);
                 }
-            }, [filterType, startDate, endDate, opInput]);
+            }, [filterType, startDate, endDate, opInput, partidaFilter]);
 
             // Exportar a Excel con ExcelJS
             const handleExportExcel = async () => {
@@ -1250,11 +1275,27 @@
                                             onChange={(e) => {
                                                 const val = e.target.value.slice(0, 5);
                                                 setOpInput(val);
+                                                setPartidaFilter('');
                                             }}
                                             placeholder="00000"
                                             maxLength={5}
                                             className="w-24 px-2 py-1.5 border border-gray-300 rounded-md text-xs text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                         />
+                                        {availablePartidas.length > 0 && (
+                                            <>
+                                                <label className="text-sm font-medium text-gray-700">Partida</label>
+                                                <select
+                                                    value={partidaFilter}
+                                                    onChange={(e) => setPartidaFilter(e.target.value)}
+                                                    className="px-2 py-1.5 border border-gray-300 rounded-md text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                >
+                                                    <option value="">Todas</option>
+                                                    {availablePartidas.map(p => (
+                                                        <option key={p} value={p}>{p}</option>
+                                                    ))}
+                                                </select>
+                                            </>
+                                        )}
                                     </div>
                                 )}
 
