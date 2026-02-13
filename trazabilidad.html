@@ -771,15 +771,15 @@
                     });
                 });
                 
-                // Encontrar las últimas 2 columnas sin datos (recorriendo desde el final)
+                // Encontrar las últimas 4 columnas sin datos (recorriendo desde el final)
                 const emptyColumnsFromEnd = [];
-                for (let i = DEFECT_COLUMNS.length - 1; i >= 0 && emptyColumnsFromEnd.length < 2; i--) {
+                for (let i = DEFECT_COLUMNS.length - 1; i >= 0 && emptyColumnsFromEnd.length < 4; i--) {
                     if (!columnsWithData.has(DEFECT_COLUMNS[i])) {
                         emptyColumnsFromEnd.push(DEFECT_COLUMNS[i]);
                     }
                 }
                 
-                // Retornar columnas excluyendo las últimas 2 vacías
+                // Retornar columnas excluyendo las últimas 4 vacías
                 return DEFECT_COLUMNS.filter(col => !emptyColumnsFromEnd.includes(col));
             }, [filteredData]);
 
