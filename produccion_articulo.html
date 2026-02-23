@@ -372,13 +372,72 @@
             return `${year}-${month}-${day}`;
         };
 
+        // Obtener fecha segura a partir de una fila: prioriza fecha completa, luego intenta usar columna 'Año' si falta el año
+        const getSafeRowDate = (row) => {
+            const rawDateStr = row['Día'] || row['Dia'] || row['Day'] || row['Fecha'] || '';
+            let rowDate = parseSheetDate(rawDateStr);
+
+            // Si la cadena original no contiene año (no hay 4 dígitos) y parseó con año por defecto (p.ej. 2001), intentar usar columna 'Año'
+            const lacksYearInString = rawDateStr && !/\d{4}/.test(String(rawDateStr));
+            if ((rowDate && rowDate.year === 2001 && lacksYearInString) || !rowDate) {
+                // Buscar columna de año en la fila
+                const yearCandidates = [row['Año'], row['Ano'], row['Year'], row['YEAR']];
+                let year = null;
+                for (const c of yearCandidates) {
+                    if (c === undefined || c === null) continue;
+                    const s = String(c).trim();
+                    if (/^\d{4}$/.test(s)) { year = Number(s); break; }
+                    // A veces viene como número (2026) directamente
+                    if (!isNaN(Number(s)) && Number(s) > 1900 && Number(s) < 3000) { year = Number(s); break; }
+                }
+
+                if (year) {
+                    // Intentar añadir el año a la cadena original y parsear
+                    if (rawDateStr) {
+                        const augmented = rawDateStr + '/' + year;
+                        const parsedAug = parseSheetDate(augmented);
+                        if (parsedAug) return parsedAug;
+                    }
+
+                    // Si no hay rawDateStr o el augmented falló, intentar construir desde campos separados
+                    const dayCandidate = row['Día'] || row['Dia'] || row['Day'] || row['Dia.'] || row['Day.'];
+                    const monthCandidate = row['Mes'] || row['MES'] || row['Mes.'] || row['Month'] || row['month'];
+                    let day = null, month = null;
+                    if (dayCandidate !== undefined && dayCandidate !== null) {
+                        const d = parseInt(String(dayCandidate).replace(/[^0-9]/g, ''), 10);
+                        if (!isNaN(d)) day = d;
+                    }
+                    if (monthCandidate) {
+                        const mstr = String(monthCandidate).trim().toLowerCase();
+                        const mesesMapLocal = {
+                            'ene':0,'enero':0,'feb':1,'febrero':1,'mar':2,'marzo':2,'abr':3,'abril':3,'may':4,'mayo':4,'jun':5,'junio':5,'jul':6,'julio':6,'ago':7,'agosto':7,'sep':8,'sept':8,'septiembre':8,'oct':9,'octubre':9,'nov':10,'noviembre':10,'dic':11,'diciembre':11
+                        };
+                        // Soportar formatos numéricos (1-12)
+                        const mnum = parseInt(mstr, 10);
+                        if (!isNaN(mnum) && mnum >= 1 && mnum <= 12) month = mnum - 1;
+                        else {
+                            const key = mstr.substring(0,3);
+                            if (mesesMapLocal[key] !== undefined) month = mesesMapLocal[key];
+                            else if (mesesMapLocal[mstr] !== undefined) month = mesesMapLocal[mstr];
+                        }
+                    }
+
+                    if (year && day !== null && month !== null) {
+                        const d = new Date(year, month, day);
+                        return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate(), asDate: d };
+                    }
+                }
+            }
+
+            return rowDate;
+        };
+
         // Función para calcular fechas dinámicas basadas en los datos
         const calculateDateRangeFromData = (allData) => {
             let maxDate = null;
             
             allData.forEach(row => {
-                const rawDateStr = row['Día'] || row['Dia'] || row['Day'] || row['Fecha'] || '';
-                const rowDate = parseSheetDate(rawDateStr);
+                const rowDate = getSafeRowDate(row);
                 if (rowDate) {
                     const dateNum = rowDate.year * 10000 + (rowDate.month + 1) * 100 + rowDate.day;
                     if (!maxDate || dateNum > maxDate.num) {
@@ -423,6 +482,17 @@
             };
             
             const str = String(dateStr).trim().toLowerCase();
+
+            // Detectar números seriales de Excel/Sheets (ej: 44705) y convertirlos
+            // a fecha JS asumiendo epoch de Excel (1899-12-30), usado por Sheets/Excel.
+            if (/^\d+(?:\.0+)?$/.test(str)) {
+                const serial = Number(str);
+                // Excel/Sheets: días desde 1899-12-30
+                const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+                const jsTime = excelEpoch.getTime() + Math.round(serial * 24 * 60 * 60 * 1000);
+                const d = new Date(jsTime);
+                return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate(), asDate: d };
+            }
             
             // Formato dd/mmm/yyyy (ej: 25/jul/2025)
             const match = str.match(/(\d{1,2})\/([a-z]{3,})\/(\d{4})/);
@@ -928,8 +998,7 @@
                         
                         // Filtrar por las fechas calculadas
                         const filteredByDate = allData.filter(row => {
-                            const rawDateStr = row['Día'] || row['Dia'] || row['Day'] || row['Fecha'] || '';
-                            const rowDate = parseSheetDate(rawDateStr);
+                            const rowDate = getSafeRowDate(row);
                             if (!rowDate) return false;
                             return compareDates(rowDate, calcStart, calcEnd);
                         });
@@ -1018,8 +1087,7 @@
                             // Filtrar por fechas localmente
                             updateModalStatus(`Filtrando ${allData.length} registros por fechas...`);
                             data = allData.filter(row => {
-                                const rawDateStr = row['Día'] || row['Dia'] || row['Day'] || row['Fecha'] || '';
-                                const rowDate = parseSheetDate(rawDateStr);
+                                const rowDate = getSafeRowDate(row);
                                 if (!rowDate) return false;
                                 return compareDates(rowDate, startDate, endDate);
                             });
