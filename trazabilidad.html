@@ -169,7 +169,7 @@
         // ============================================
         // CONFIGURACIÓN - PEGAR AQUÍ LA URL DE APPS SCRIPT
         // ============================================
-        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_sS4m7Mll4uwpiMHImgvDKtZACt6J653r2fgeUFNSr1q0REGhncQeEW9nYUbrJeJo/exec";
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby9elh9dctolsPIQYUY2ORT7JnP10AInidx1OOON02omhkjRXhZpICOfdDAh7mP_35G/exec";
         // ============================================
 
         // ============================================
@@ -537,6 +537,40 @@
                 normalized[cleanKey] = row[key];
             });
             return normalized;
+        };
+
+        // --- FUNCION PARA MERGE/APPEND POR CLAVE COMPUESTA (OP+Partida+Rollo+Cod. Art.) ---
+        const mergeIncomingToExisting = (existingArray, incomingArray) => {
+            const buildKey = (r) => `${String(r.OP||'').trim()}|${String(r.Partida||'').trim()}|${String(r.Rollo||'').trim()}|${String(r['Cod. Art.']||'').trim()}`;
+
+            const existing = Array.isArray(existingArray) ? existingArray.slice() : [];
+            const mapIndex = new Map();
+            existing.forEach((row, idx) => {
+                const k = buildKey(row);
+                if (k && k !== '| | |') mapIndex.set(k, idx);
+            });
+
+            incomingArray.forEach(inRow => {
+                const row = inRow || {};
+                const k = buildKey(row);
+                if (!k || k === '| | |') {
+                    // Si no tiene clave válida, simplemente anexar al final
+                    existing.push(row);
+                    return;
+                }
+
+                if (mapIndex.has(k)) {
+                    // Reemplazar/mezclar: conservar campos existentes y sobreescribir con incoming
+                    const idx = mapIndex.get(k);
+                    existing[idx] = Object.assign({}, existing[idx], row);
+                } else {
+                    // Nuevo registro: anexar
+                    mapIndex.set(k, existing.length);
+                    existing.push(row);
+                }
+            });
+
+            return existing;
         };
 
         // --- COLUMNAS DE DEFECTOS ---
@@ -1028,10 +1062,13 @@
                         // Sincronizar con Google Sheets
                         try {
                             await syncWithGoogleSheet(jsonData);
-                            
-                            // Normalizar columnas y actualizar datos locales
+
+                            // Normalizar columnas y MERGE con datos locales (append + reemplazo por clave compuesta)
                             const normalizedJsonData = jsonData.map(row => normalizeColumnNames(row));
-                            setData(normalizedJsonData);
+                            const merged = mergeIncomingToExisting(data, normalizedJsonData);
+                            setData(merged);
+                            // Actualizar cache global si existe
+                            try { allSheetData = merged; } catch(e) {}
                             setFileName(file.name);
                             setSelectedOP("");
                             setSelectedPartida("");
@@ -1042,14 +1079,16 @@
                             );
                         } catch (syncError) {
                             console.error('Error de sincronización:', syncError);
-                            
-                            // Aún así cargar datos localmente (normalizados)
+
+                            // Aún así cargar datos localmente (normalizados) y hacer MERGE
                             const normalizedJsonData = jsonData.map(row => normalizeColumnNames(row));
-                            setData(normalizedJsonData);
+                            const merged = mergeIncomingToExisting(data, normalizedJsonData);
+                            setData(merged);
+                            try { allSheetData = merged; } catch(e) {}
                             setFileName(file.name);
                             setSelectedOP("");
                             setSelectedPartida("");
-                            
+
                             if (syncError.message.includes("Configure la URL")) {
                                 showModalError(
                                     "URL de Apps Script no configurada",
