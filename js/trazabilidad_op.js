@@ -89,8 +89,9 @@
     // ── Utilidades de fecha y agregación para la gráfica ───────────────────────
     const CHART_MONTH_LABELS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
     const CHART_MONTH_MAP = { ene:0,feb:1,mar:2,abr:3,may:4,jun:5,jul:6,ago:7,sep:8,oct:9,nov:10,dic:11 };
-    // Paleta para clientes (la línea de rechazos usa rojo aparte)
-    const CHART_CLIENT_COLORS = ['#4f8f62','#2563eb','#d39b36','#7c3aed','#0891b2','#db2777','#65a30d','#ea580c','#0d9488','#9333ea','#475569','#ca8a04'];
+    // Paleta moderna (Tailwind 500) para clientes — saturada y plana.
+    // No incluye rojos: el rojo queda reservado para la línea de rechazos.
+    const CHART_CLIENT_COLORS = ['#3b82f6','#f59e0b','#8b5cf6','#10b981','#06b6d4','#ec4899','#6366f1','#84cc16','#14b8a6','#d946ef','#eab308','#64748b'];
     const CHART_RECHAZO_COLOR = '#dc2626';
 
     // Parsea fechas DD/Mes/YYYY HH:mm AM/PM, ISO o serial Excel (misma lógica que iq_data.js)
@@ -261,7 +262,7 @@
             const n = chart.data.labels.length;
 
             ctx.save();
-            ctx.font = "bold 13px 'Calibri', Arial, sans-serif";
+            ctx.font = "bold 16px 'Calibri', Arial, sans-serif";
             ctx.textAlign = 'center';
 
             for (let i = 0; i < n; i++) {
@@ -407,7 +408,7 @@
                     // 'nearest' + intersect: distingue si el cursor está sobre una barra o sobre el punto de rechazos
                     interaction: { mode: 'nearest', intersect: true },
                     plugins: {
-                        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+                        legend: { display: false }, // Usamos una leyenda HTML personalizada (ver más abajo)
                         totalLabels: { aprobTotals, rechTotals: rechazosData },
                         tooltip: {
                             displayColors: false,
@@ -441,13 +442,14 @@
                         },
                     },
                     scales: {
-                        x:  { stacked: true, grid: { display: false } },
+                        x:  { stacked: true, grid: { display: false },
+                              ticks: { font: { size: 14, weight: 'bold' } } },
                         y:  { stacked: true, beginAtZero: true, position: 'left', max: axisMax,
-                              title: { display: true, text: 'OP-Partidas aprobadas' },
-                              ticks: { precision: 0 } },
+                              title: { display: true, text: 'OP-Partidas aprobadas', font: { size: 14, weight: 'bold' } },
+                              ticks: { display: false } },
                         y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, max: axisMax,
-                              title: { display: true, text: 'Rechazos' },
-                              ticks: { precision: 0 } },
+                              title: { display: true, text: 'Rechazos', font: { size: 14, weight: 'bold' } },
+                              ticks: { display: false } },
                     },
                 },
                 plugins: [totalLabelsPlugin],
@@ -479,6 +481,26 @@
                     </div>
                     {/* Cuerpo */}
                     <div className="p-5 flex-1 overflow-auto">
+                        {/* Leyenda personalizada: pill "Aprobadas" agrupando clientes + Rechazos con círculo */}
+                        {chartData.hasData && (
+                            <div className="flex justify-end items-start gap-4 mb-3 pr-1">
+                                <fieldset className="border border-[#c8d8bd] rounded-lg px-3 pt-0.5 pb-1.5">
+                                    <legend className="text-[12px] font-bold text-[#3f7550] px-1.5">Aprobadas</legend>
+                                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        {chartData.clienteDatasets.map(ds => (
+                                            <span key={ds.label} className="inline-flex items-center gap-1.5 text-[12px] text-black">
+                                                <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: ds.backgroundColor }}></span>
+                                                {ds.label}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </fieldset>
+                                <div className="flex items-center gap-1.5 text-[12px] text-black self-center">
+                                    <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: CHART_RECHAZO_COLOR }}></span>
+                                    Rechazos
+                                </div>
+                            </div>
+                        )}
                         <div className="relative" style={{ height: '60vh', minHeight: '360px' }}>
                             <canvas ref={canvasRef}></canvas>
                             {!chartData.hasData && (
