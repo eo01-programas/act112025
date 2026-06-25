@@ -55,13 +55,15 @@ function iqFilterEvents() {
     const currentPeriod = iqIsCurrentPeriod();
 
     return IQ_STATE.allEvents.filter(event => {
-        // EN_EVALUACION en la semana actual: incluir todas las partidas abiertas
-        // (tienen calidad_inicio pero no calidad_fin), sin importar cuándo iniciaron.
+        // EN_EVALUACION en la semana actual: incluir todas las partidas en proceso
+        // con la misma regla que "En calidad" del módulo principal (estado y acabado
+        // especial ya se validan al expandir eventos), sin importar cuándo iniciaron
+        // ni si ya registraron calidad_fin.
         if (currentPeriod && event._estado === 'EN_EVALUACION') {
             if (IQ_STATE.cliente   && String(event.cliente   || '').trim() !== IQ_STATE.cliente)   return false;
             if (IQ_STATE.codArt    && String(event.cod_art   || '').trim() !== IQ_STATE.codArt)    return false;
             if (IQ_STATE.tipoTela  && String(event.tipo_tela || '').trim() !== IQ_STATE.tipoTela)  return false;
-            return !String(event.calidad_fin || '').trim();
+            return true;
         }
 
         const refDate = event._refDate;
