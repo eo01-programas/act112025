@@ -664,8 +664,8 @@
                                     <col style={{ width: '3%' }} />
                                     <col style={{ width: '8%' }} />
                                     <col style={{ width: '24%' }} />
-                                    <col style={{ width: '12%' }} />
-                                    <col style={{ width: '11%' }} />
+                                    <col style={{ width: '14%' }} />
+                                    <col style={{ width: '9%' }} />
                                 </colgroup>
                                 <thead className="sticky top-0 z-10">
                                     <tr className="bg-[#dfeccd] text-[#3f7550] text-[13px] uppercase tracking-wide">
