@@ -121,6 +121,14 @@ function iqIsEnEvaluacion(record) {
     return !iqIsAprobada(record) && !iqIsRechazada(record);
 }
 
+// Lista para calidad — réplica de isReadyForCalidad en modulo_principal/js/calidad.js.
+// El acabado especial debe estar OK o no aplicar para que la partida cuente.
+function iqIsReadyForCalidad(record) {
+    const acabadoTipo   = String(record.acabado_especial_tipo || '').trim();
+    const acabadoEstado = String(record.acabado_especial_estado || record.acab_espec_estado || '').trim();
+    return acabadoTipo === 'NO LLEVA' || acabadoTipo === 'OK' || acabadoEstado === 'OK';
+}
+
 // Returns all non-empty motivos from motivo_rechazo_1..7 (deduplicated within record)
 function iqGetRecordMotivos(record) {
     const seen = new Set();
@@ -243,7 +251,9 @@ function iqExpandToEvents(records) {
                     _record:     record,
                 });
             }
-        } else {
+        } else if (iqIsEnEvaluacion(record) && iqIsReadyForCalidad(record)) {
+            // Misma regla que "En calidad" del módulo principal: estado vacío/'X PROG'
+            // y acabado especial listo. Sin esto, Aseg sobre-contaba partidas.
             const refDate = iqAdjustNightShift(iqParseDateish(record.calidad_inicio));
             if (refDate) {
                 events.push({
