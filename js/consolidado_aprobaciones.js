@@ -190,23 +190,7 @@
         <!-- SECCIÓN DE CARDS DE INDICADORES (KPIs) -->
         <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-3">
             
-            <!-- KPI 1: BIEN A LA PRIMERA NETO -->
-            <div class="print-card bg-white rounded-2xl p-3 border border-slate-100 shadow-sm flex items-center justify-between transition-all-300 hover:shadow-md">
-                <div>
-                    <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Bien a la 1ª Neto</p>
-                    <div class="flex items-baseline gap-2">
-                        <h3 id="kpi-neto-bien" class="text-3xl font-extrabold text-[#3f7550]">–</h3>
-                        <span id="kg-neto-bien" class="text-sm font-semibold text-slate-400"></span>
-                        <span id="pct-bien" class="text-xs font-bold bg-[#eef5e8] text-[#3f7550] px-1.5 py-0.5 rounded-md"></span>
-                    </div>
-                    <p class="text-[11px] font-medium text-slate-500 mt-1">Aprobado + Tolerancia - Rechazos</p>
-                </div>
-                <div class="p-3 bg-[#eef5e8] text-[#3f7550] rounded-xl">
-                    <i data-lucide="check-circle" class="w-6 h-6"></i>
-                </div>
-            </div>
-
-            <!-- KPI 2: PARTIDAS APROBADAS -->
+            <!-- KPI 1: PARTIDAS APROBADAS -->
             <div class="print-card bg-white rounded-2xl p-3 border border-slate-100 shadow-sm flex items-center justify-between transition-all-300 hover:shadow-md">
                 <div>
                     <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Partidas Aprobadas</p>
@@ -222,7 +206,23 @@
                 </div>
             </div>
 
-            <!-- KPI 3: VOLUMEN DE PARTIDAS -->
+            <!-- KPI 2: PARTIDAS RECHAZADAS -->
+            <div class="print-card bg-white rounded-2xl p-3 border border-slate-100 shadow-sm flex items-center justify-between transition-all-300 hover:shadow-md">
+                <div>
+                    <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Partidas Rechazadas</p>
+                    <div class="flex items-baseline gap-2">
+                        <h3 id="kpi-rechazos" class="text-3xl font-extrabold text-[#b65b5b]">–</h3>
+                        <span id="kg-rechazos" class="text-sm font-semibold text-slate-400"></span>
+                        <span id="pct-rechazos" class="text-xs font-bold bg-[#f6e8e8] text-[#8a2f2f] px-1.5 py-0.5 rounded-md"></span>
+                    </div>
+                    <p class="text-[11px] font-medium text-[#b65b5b]/80 mt-1">Partidas no aprobadas (rechazadas)</p>
+                </div>
+                <div class="p-3 bg-[#f6e8e8] text-[#b65b5b] rounded-xl">
+                    <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+                </div>
+            </div>
+
+            <!-- KPI 3: TOTAL DE PARTIDAS AUDITADAS -->
             <div class="print-card bg-white rounded-2xl p-3 border border-slate-100 shadow-sm flex items-center justify-between transition-all-300 hover:shadow-md">
                 <div>
                     <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Total de partidas auditadas</p>
@@ -238,19 +238,19 @@
                 </div>
             </div>
 
-            <!-- KPI 4: CANTIDAD RECHAZOS -->
-            <div class="print-card bg-white rounded-2xl p-3 border border-slate-100 shadow-sm flex items-center justify-between transition-all-300 hover:shadow-md">
+            <!-- KPI 4: BIEN A LA PRIMERA NETO -->
+            <div class="print-card bg-[#2f5a3c] rounded-2xl p-3 border border-[#2f5a3c] shadow-sm flex items-center justify-between transition-all-300 hover:shadow-md">
                 <div>
-                    <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Partidas Rechazadas</p>
+                    <p class="text-xs font-bold text-white/70 uppercase tracking-wider mb-1">Bien a la 1ª Neto</p>
                     <div class="flex items-baseline gap-2">
-                        <h3 id="kpi-rechazos" class="text-3xl font-extrabold text-[#b65b5b]">–</h3>
-                        <span id="kg-rechazos" class="text-sm font-semibold text-slate-400"></span>
-                        <span id="pct-rechazos" class="text-xs font-bold bg-[#f6e8e8] text-[#8a2f2f] px-1.5 py-0.5 rounded-md"></span>
+                        <h3 id="kpi-neto-bien" class="text-3xl font-extrabold text-white">–</h3>
+                        <span id="kg-neto-bien" class="text-sm font-semibold text-white/70"></span>
+                        <span id="pct-bien" class="text-xs font-bold bg-white/20 text-white px-1.5 py-0.5 rounded-md"></span>
                     </div>
-                    <p class="text-[11px] font-medium text-[#b65b5b]/80 mt-1">Partidas no aprobadas (rechazadas)</p>
+                    <p class="text-[11px] font-medium text-white/75 mt-1">Aprobado + Tolerancia - Rechazos</p>
                 </div>
-                <div class="p-3 bg-[#f6e8e8] text-[#b65b5b] rounded-xl">
-                    <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+                <div class="p-3 bg-white/15 text-white rounded-xl">
+                    <i data-lucide="check-circle" class="w-6 h-6"></i>
                 </div>
             </div>
 
