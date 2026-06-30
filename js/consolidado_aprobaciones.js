@@ -673,21 +673,33 @@
             return `hace ${dias} día${dias > 1 ? "s" : ""}`;
         }
 
-        // estado: 'ok' (recién sincronizado), 'cache' (mostrando caché), 'error' (red falló)
+        // estado: 'loading' (conectando sin caché), 'ok' (recién sincronizado), 'cache' (mostrando caché), 'error' (red falló)
         let estadoFrescura = 'cache';
         function actualizarFrescura(estado) {
             if (estado) estadoFrescura = estado;
             const el = document.getElementById('data-freshness');
             if (!el) return;
             const ts = leerTimestampCache();
-            if (!ts) { el.innerHTML = ''; return; }
+
+            if (!ts) {
+                if (estadoFrescura === 'loading') {
+                    el.className = 'text-[11px] mt-1 font-medium flex items-center gap-1.5 text-[#eef5e8]/70';
+                    el.innerHTML = `<span class="inline-block w-1.5 h-1.5 rounded-full bg-[#9fe0a0] animate-ping"></span>Conectando con el servidor…`;
+                } else {
+                    el.innerHTML = '';
+                }
+                return;
+            }
 
             const edad = Date.now() - ts;
             const fechaAbs = new Date(ts).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
             const viejo = edad > CACHE_TTL_MS;
 
             let dot, texto, cls;
-            if (estadoFrescura === 'error') {
+            if (estadoFrescura === 'loading') {
+                dot = '#9fe0a0'; cls = 'text-[#eef5e8]/70';
+                texto = `Actualizando datos (${formatearAntiguedad(edad)})`;
+            } else if (estadoFrescura === 'error') {
                 dot = '#d39b36'; cls = 'text-[#ffe6b0]';
                 texto = `Sin conexión · datos de ${formatearAntiguedad(edad)}`;
             } else if (estadoFrescura === 'ok' && !viejo) {
@@ -720,6 +732,7 @@
 
         // Carga desde la hoja: muestra al instante lo cacheado y luego refresca del servidor
         async function cargarDatosDesdeSheet(forzar = false) {
+            let hayCache = false;
             if (!forzar) {
                 try {
                     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -728,10 +741,13 @@
                         if (Array.isArray(parsed) && parsed.length) {
                             aplicarRegistros(parsed);
                             actualizarFrescura('cache');
+                            hayCache = true;
                         }
                     }
                 } catch (e) { /* ignore */ }
             }
+            // Indicar en el header que se está actualizando (no bloquea la UI)
+            if (!hayCache || forzar) actualizarFrescura('loading');
             try {
                 const url = new URL(WEB_APP_URL);
                 url.searchParams.set('action', 'list');
@@ -750,8 +766,8 @@
             } catch (e) {
                 console.error('[FPY] Error cargando datos:', e);
                 if (!activeData.length) {
-                    ocultarCargando();
                     mostrarAlerta("Error de carga", "No se pudieron cargar los datos de la hoja. Verifique su conexión y vuelva a intentar.", "error");
+                    actualizarFrescura('error');
                 } else {
                     // Hay datos en caché: aviso discreto en el encabezado, sin modal
                     actualizarFrescura('error');
@@ -1240,10 +1256,10 @@
     window.cargarDatosDesdeSheet = cargarDatosDesdeSheet;
     window.cerrarAlerta = cerrarAlerta;
 
-    // Arranque (el DOM ya está montado en #root).
-    // No se llama a actualizarVisualizacion() aquí: sin datos pintaría ceros. El overlay
-    // de carga cubre la espera y aplicarRegistros() pinta y lo oculta al llegar los datos.
+    // Arranque: mostrar la UI de inmediato (KPIs con "–") sin bloquear con el overlay.
+    // Los datos llegan del servidor y actualizan la vista en cuanto están disponibles.
     inicializarSelectoresFiltros();
-    actualizarFrescura();
+    ocultarCargando();
+    actualizarFrescura('loading');
     cargarDatosDesdeSheet(false);
 })();
