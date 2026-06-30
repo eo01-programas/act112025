@@ -143,21 +143,33 @@
                 </div>
             </section>
 
-            <section class="iq-section">
-                <div class="section-header">
-                    <h2>Top Motivos de Rechazo</h2>
-                    <div class="pill-toggle">
-                        <button class="pill-btn active" data-chart-mode="freq">Frecuencia</button>
-                        <button class="pill-btn"        data-chart-mode="kg">Peso (kg)</button>
+            <div class="two-col-row">
+                <section class="iq-section">
+                    <div class="section-header">
+                        <h2>Top Motivos de Rechazo</h2>
+                        <div class="pill-toggle">
+                            <button class="pill-btn active" data-chart-mode="freq">Frecuencia</button>
+                            <button class="pill-btn"        data-chart-mode="kg">Peso (kg)</button>
+                        </div>
+                        <button id="btn-pareto" class="btn-secondary">Ver Pareto →</button>
+                        <p class="section-sub" id="top-motivos-subtitle"></p>
                     </div>
-                    <button id="btn-pareto" class="btn-secondary">Ver Pareto →</button>
-                    <p class="section-sub" id="top-motivos-subtitle"></p>
-                </div>
-                <div id="pareto-summary-inline" class="pareto-summary-inline"></div>
-                <div id="top-motivos-chart">
-                    <div class="empty-state">Cargando datos…</div>
-                </div>
-            </section>
+                    <div id="pareto-summary-inline" class="pareto-summary-inline"></div>
+                    <div id="top-motivos-chart">
+                        <div class="empty-state">Cargando datos…</div>
+                    </div>
+                </section>
+
+                <section class="iq-section">
+                    <div class="section-header">
+                        <h2>Artículos con Rechazo</h2>
+                        <p class="section-sub" id="rechazos-articulo-subtitle"></p>
+                    </div>
+                    <div id="rechazos-por-articulo-chart">
+                        <div class="empty-state">Cargando datos…</div>
+                    </div>
+                </section>
+            </div>
         </main>
 
         <div id="partidas-modal" class="modal-overlay hidden">
