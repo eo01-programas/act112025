@@ -151,6 +151,82 @@ function iqRenderTopMotivos(events, mode) {
     }).join('');
 }
 
+// ── Artículos con Rechazo ─────────────────────────────────────────────────────
+
+function iqRenderRechazosArticulo(events, mode) {
+    const container = document.getElementById('rechazos-por-articulo-chart');
+    const subtitle  = document.getElementById('rechazos-articulo-subtitle');
+    if (!container) return;
+
+    const stats     = {};
+    const clientMap = {};
+
+    events.forEach(event => {
+        if (event._estado !== 'RECHAZADO') return;
+        const cod     = String(event.cod_art  || '').trim();
+        const art     = String(event.articulo || '').trim();
+        const cliente = String(event.cliente  || '').trim() || '(Sin cliente)';
+        if (!cod) return;
+        const kg = iqGetKg(event);
+        if (!stats[cod])            stats[cod]            = { cod, art, count: 0, kg: 0 };
+        if (!clientMap[cod])        clientMap[cod]        = {};
+        if (!clientMap[cod][cliente]) clientMap[cod][cliente] = { count: 0, kg: 0 };
+        stats[cod].count++;
+        stats[cod].kg += kg;
+        clientMap[cod][cliente].count++;
+        clientMap[cod][cliente].kg += kg;
+    });
+
+    const data = Object.values(stats)
+        .sort((a, b) => mode === 'kg' ? b.kg - a.kg : b.count - a.count)
+        .map(item => {
+            const sorted = Object.entries(clientMap[item.cod] || {})
+                .sort((a, b) => mode === 'kg' ? b[1].kg - a[1].kg : b[1].count - a[1].count);
+            return { ...item, topClient: sorted[0] ? sorted[0][0] : null };
+        });
+
+    if (data.length === 0) {
+        container.innerHTML = '<div class="empty-state">Sin rechazos en el período seleccionado.</div>';
+        if (subtitle) subtitle.textContent = '';
+        return;
+    }
+
+    const totalVal = data.reduce((s, d) => s + (mode === 'kg' ? d.kg : d.count), 0);
+    const maxVal   = mode === 'kg'
+        ? Math.max(...data.map(d => d.kg))
+        : Math.max(...data.map(d => d.count));
+
+    if (subtitle) {
+        subtitle.textContent = mode === 'kg'
+            ? `Kilogramos rechazados por artículo · ${totalVal.toLocaleString('es-PE', { maximumFractionDigits: 1 })} kg en total`
+            : `Partidas rechazadas por artículo · ${totalVal} rechazos en total`;
+    }
+
+    container.innerHTML = data.map((item, i) => {
+        const val        = mode === 'kg' ? item.kg : item.count;
+        const barPct     = maxVal > 0 ? (val / maxVal) * 100 : 0;
+        const sharePct   = totalVal > 0 ? ((val / totalVal) * 100).toFixed(1) : '0.0';
+        const displayVal = mode === 'kg'
+            ? `${val.toLocaleString('es-PE', { maximumFractionDigits: 1 })} kg`
+            : `${val} rechazos`;
+        const fillClass  = i < 3 ? 'bar-fill-primary' : i < 7 ? 'bar-fill-secondary' : 'bar-fill-tertiary';
+        const label      = item.art ? `${item.cod} · ${item.art}` : item.cod;
+        const innerParts = [item.topClient, displayVal, `${sharePct}%`].filter(Boolean);
+        const innerText  = innerParts.join(' · ');
+
+        return `
+            <div class="bar-chart-item arc-bar-item">
+                <div class="bar-rank">${i + 1}</div>
+                <div class="bar-label arc-label" title="${iqEscapeHtml(label)}">${iqEscapeHtml(label)}</div>
+                <div class="bar-track">
+                    <div class="bar-fill ${fillClass}" style="width:${barPct.toFixed(1)}%"></div>
+                    <span class="arc-inner-text">${iqEscapeHtml(innerText)}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
 // ── Bar tooltip ───────────────────────────────────────────────────────────────
 
 function iqInitBarTooltip() {
