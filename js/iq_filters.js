@@ -362,6 +362,7 @@ function iqRenderAll() {
     iqRenderKPIs(filtered);
     iqRenderMatrix(filtered);
     iqRenderTopMotivos(filtered, IQ_STATE.chartMode);
+    iqRenderRechazosArticulo(filtered, IQ_STATE.chartMode);
     iqRenderAuditorTable(filtered);
     iqRenderQuienAproboTable(filtered);
     iqPopulateTipoTelaOptions();
@@ -523,7 +524,9 @@ function iqInitFilters() {
             document.querySelectorAll('[data-chart-mode]').forEach(b =>
                 b.classList.toggle('active', b.dataset.chartMode === IQ_STATE.chartMode)
             );
-            iqRenderTopMotivos(iqFilterEvents(), IQ_STATE.chartMode);
+            const evts = iqFilterEvents();
+            iqRenderTopMotivos(evts, IQ_STATE.chartMode);
+            iqRenderRechazosArticulo(evts, IQ_STATE.chartMode);
         });
     });
 
