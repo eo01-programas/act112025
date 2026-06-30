@@ -480,7 +480,7 @@ th.col-top-3 { box-shadow: inset 0 3px 0 #ffc107; }
 /* ── Two-column row ─────────────────────────────────────────────────────────── */
 .two-col-row {
     display: grid;
-    grid-template-columns: 45fr 55fr;
+    grid-template-columns: 55fr 45fr;
     gap: 18px;
     align-items: start;
 }
@@ -658,8 +658,8 @@ th.col-top-3 { box-shadow: inset 0 3px 0 #ffc107; }
 }
 
 .arc-bar-item .bar-track {
-    flex: 0 0 220px;
-    width: 220px;
+    flex: 0 0 160px;
+    width: 160px;
 }
 
 .arc-inner-text {
