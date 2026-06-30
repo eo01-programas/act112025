@@ -272,30 +272,6 @@
                 </div>
             </div>
 
-            <!-- TABLA: DETALLE BIEN A LA PRIMERA -->
-            <div class="print-card bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
-                <div class="flex items-center gap-2 border-b border-slate-100 pb-3 mb-4">
-                    <span class="w-2.5 h-2.5 rounded-full bg-[#4f8f62] animate-pulse"></span>
-                    <h3 class="font-bold text-xs text-slate-700 uppercase tracking-wider">BIEN A LA PRIMERA (Aprobado + Tolerancia)</h3>
-                </div>
-
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="bg-slate-50/70 text-slate-500 text-[10px] font-bold uppercase border-b border-slate-100">
-                                <th class="py-2.5 px-3 rounded-l-xl">Cliente</th>
-                                <th class="py-2.5 px-3 text-right">Partidas</th>
-                                <th class="py-2.5 px-3 text-right text-[#b65b5b]">Rechazos</th>
-                                <th class="py-2.5 px-3 text-right rounded-r-xl text-[#3f7550]">NETO</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tbl-bien-primera-body" class="text-xs font-medium">
-                            <!-- Filas inyectadas dinámicamente -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
             <!-- TABLA: DETALLE APROBADO CON AUTORIZACIÓN -->
             <div class="print-card bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
                 <div class="flex items-center gap-2 border-b border-slate-100 pb-3 mb-4">
@@ -314,6 +290,30 @@
                             </tr>
                         </thead>
                         <tbody id="tbl-autorizados-body" class="text-xs font-medium">
+                            <!-- Filas inyectadas dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TABLA: DETALLE BIEN A LA PRIMERA -->
+            <div class="print-card bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+                <div class="flex items-center gap-2 border-b border-slate-100 pb-3 mb-4">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#4f8f62] animate-pulse"></span>
+                    <h3 class="font-bold text-xs text-slate-700 uppercase tracking-wider">BIEN A LA PRIMERA (Aprobado + Tolerancia)</h3>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-50/70 text-slate-500 text-[10px] font-bold uppercase border-b border-slate-100">
+                                <th class="py-2.5 px-3 rounded-l-xl">Cliente</th>
+                                <th class="py-2.5 px-3 text-right">Partidas</th>
+                                <th class="py-2.5 px-3 text-right text-[#b65b5b]">Rechazos</th>
+                                <th class="py-2.5 px-3 text-right rounded-r-xl text-[#3f7550]">NETO</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbl-bien-primera-body" class="text-xs font-medium">
                             <!-- Filas inyectadas dinámicamente -->
                         </tbody>
                     </table>
