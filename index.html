@@ -10,16 +10,39 @@
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
     <link rel="preconnect" href="https://cdn.tailwindcss.com">
-    <script src="https://cdn.tailwindcss.com" defer></script>
-    <script src="https://unpkg.com/react@18/umd/react.development.js" defer></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" defer></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+    <!-- Las librerías CDN (Tailwind, React, Chart.js, etc.) ya no se cargan aquí:
+         js/app_bootstrap.js inyecta solo las que necesita la vista actual. -->
 </head>
 <body data-view="home">
+    <script>
+    // Instrumentación de rendimiento SOLO para pruebas (?perf=1). TEMPORAL.
+    (() => {
+        if (!/[?&]perf=1/.test(location.search)) return;
+        const mark = (label) => console.log("[PERF] " + label + " " + Math.round(performance.now()) + "ms");
+        addEventListener("DOMContentLoaded", () => {
+            mark("DOMContentLoaded");
+            const root = document.getElementById("root");
+            if (!root) return;
+            const obs = new MutationObserver(() => {
+                if (root.childElementCount > 0) {
+                    mark("primer-contenido");
+                    obs.disconnect();
+                }
+            });
+            if (root.childElementCount > 0) mark("primer-contenido");
+            else obs.observe(root, { childList: true, subtree: true });
+        });
+        setTimeout(() => {
+            const res = performance.getEntriesByType("resource").map(e => ({
+                n: e.name.replace(/\?.*$/, "").split("/").slice(-1)[0].slice(0, 42) || e.name.slice(8, 40),
+                inicio: Math.round(e.startTime),
+                dur: Math.round(e.duration),
+                kb: Math.round((e.transferSize || 0) / 1024)
+            }));
+            console.log("[PERF] recursos " + JSON.stringify(res));
+        }, 12000);
+    })();
+    </script>
     <div id="root"></div>
 
     <div id="loading-modal" class="app-modal hidden" aria-live="polite" aria-modal="true" role="dialog">
@@ -48,12 +71,14 @@
         </div>
     </div>
 
-    <script src="js/config.js" defer></script>
-    <script src="js/data_api.js" defer></script>
-    <script src="js/router.js" defer></script>
-    <script src="js/prefetch_calidad.js" defer></script>
-    <script src="js/menu.js" defer></script>
-    <script src="js/modal.js" defer></script>
-    <script src="js/app_bootstrap.js" defer></script>
+    <!-- El ?v= evita que el navegador mezcle versiones viejas y nuevas de estos
+         archivos. Mantener el valor igual a APP_VERSION en js/config.js. -->
+    <script src="js/config.js?v=2026-07-03-1" defer></script>
+    <script src="js/data_api.js?v=2026-07-03-1" defer></script>
+    <script src="js/router.js?v=2026-07-03-1" defer></script>
+    <script src="js/prefetch_calidad.js?v=2026-07-03-1" defer></script>
+    <script src="js/menu.js?v=2026-07-03-1" defer></script>
+    <script src="js/modal.js?v=2026-07-03-1" defer></script>
+    <script src="js/app_bootstrap.js?v=2026-07-03-1" defer></script>
 </body>
 </html>
