@@ -1,0 +1,736 @@
+(() => {
+    if (!window.AppRouter || window.AppRouter.currentView !== 'trazabilidad_op') {
+        return;
+    }
+
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    const WEB_APP_URL       = window.APP_CONFIG.IQ.WEB_APP_URL;
+    const LOCAL_STORAGE_KEY = window.APP_CONFIG.IQ.LOCAL_STORAGE_KEY;
+    // Catálogo de motivos para el filtro (sincronizado con mobile_calidad
+    // vía MOTIVOS_RECHAZO en config.js)
+    const MOTIVOS_CATALOGO  = window.APP_CONFIG.IQ.MOTIVOS_RECHAZO || [];
+    const MAX_MOTIVOS = 7;
+
+    // Etiquetas de tipo de tela (igual que iq_data.js)
+    const TIPO_TELA_LABELS = {
+        '100': 'Produccion', '102': 'Tela para Venta', '103': 'Desarrollo (OF)',
+        '104': 'Prueba de lote', '105': 'Prueba validacion de articulo',
+        '106': 'Prueba validacion de teñido/disperso', '107': 'Muestra de Venta',
+        '108': 'Tela de relleno', '109': 'Prueba de tela/Fundas'
+    };
+
+    const tipoTelaLabel = (raw) => {
+        const str = String(raw || '').trim();
+        if (!str) return '';
+        const code = str.includes('→') ? str.split('→')[0].trim() : str;
+        return TIPO_TELA_LABELS[code] || str;
+    };
+
+    const tipoTelaDisplay = (raw) => {
+        const str = String(raw || '').trim();
+        if (!str) return '';
+        const code = str.includes('→') ? str.split('→')[0].trim() : str;
+        const label = TIPO_TELA_LABELS[code];
+        return label ? `${code} → ${label}` : str;
+    };
+
+    const clean = (v) => String(v == null ? '' : v).trim();
+
+    // Abreviaciones para mostrar en la tabla
+    const CLIENT_ABBR = {
+        'ALLBIRDS': 'ALLB', 'AM RETAIL': 'AMR', 'AM RETAIL S.A.C.': 'AMR',
+        'ATHLETA': 'ATH', 'BANANA': 'BNN', 'COFACO INDUSTRIES': 'COF',
+        'DUER': 'DUER', 'LACOSTE': 'LAC', 'LULU': 'LULU',
+        'REVTOWN': 'REV', 'SKECHERS': 'SKE', 'THEORY': 'THE',
+    };
+    // Normalización para el filtro (fusiona variantes de AM RETAIL)
+    const CLIENT_NORMALIZE = { 'AM RETAIL S.A.C.': 'AM RETAIL' };
+
+    const clienteAbbr      = (raw) => { const s = clean(raw).toUpperCase(); return CLIENT_ABBR[s] || clean(raw); };
+    const normalizeCliente = (raw) => { const s = clean(raw); return CLIENT_NORMALIZE[s] || s; };
+
+    // --- Estado de cada partida (misma lógica que iq_data.js) ---
+    const isAprobada = (r) => clean(r.tipo_aprobacion) !== '';
+    const getMotivos = (r) => {
+        const seen = new Set();
+        const out = [];
+        for (let i = 1; i <= MAX_MOTIVOS; i++) {
+            const m = clean(r[`motivo_rechazo_${i}`]);
+            if (m && !seen.has(m)) { seen.add(m); out.push(m); }
+        }
+        return out;
+    };
+    const isRechazada = (r) => !isAprobada(r) && getMotivos(r).length > 0;
+    const getEstado = (r) => isAprobada(r) ? 'aprobada' : (isRechazada(r) ? 'rechazada' : 'evaluacion');
+
+    const ORDINAL_LABELS = ['1er','2do','3er','4to','5to','6to','7mo'];
+
+    const getRechazosFull = (r) => {
+        const out = [];
+        for (let i = 1; i <= MAX_MOTIVOS; i++) {
+            const motivo = clean(r[`motivo_rechazo_${i}`]);
+            if (!motivo) continue;
+            out.push({
+                label:      ORDINAL_LABELS[i - 1] || `${i}°`,
+                motivo,
+                fecha:      clean(r[`fecha_rechazo_${i}`]),
+                supervisor: clean(r[`supervisor_rechazo_${i}`]),
+                turno:      clean(r[`turno_rechazo_${i}`]),
+            });
+        }
+        return out;
+    };
+
+    // Resalta los últimos 5 dígitos del cod_art (convención de Trazailidad OP)
+    const splitCodArt = (code) => {
+        const str = clean(code);
+        if (str.length > 5) return [str.slice(0, -5), str.slice(-5)];
+        return ['', str];
+    };
+
+    // ── Utilidades de fecha y agregación para la gráfica ───────────────────────
+    const CHART_MONTH_LABELS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const CHART_MONTH_MAP = { ene:0,feb:1,mar:2,abr:3,may:4,jun:5,jul:6,ago:7,sep:8,oct:9,nov:10,dic:11 };
+
+    // Parsea fechas DD/Mes/YYYY HH:mm AM/PM, ISO o serial Excel (misma lógica que iq_data.js)
+    const parseDateish = (value) => {
+        if (value === null || value === undefined || value === '') return null;
+        if (typeof value === 'number' || (typeof value === 'string' && /^\d+(\.\d+)?$/.test(String(value).trim()))) {
+            const num = parseFloat(value);
+            if (num > 40000 && num < 60000) {
+                const excelEpoch = new Date(1899, 11, 30);
+                return new Date(excelEpoch.getTime() + num * 86400000);
+            }
+        }
+        const str = String(value).trim();
+        if (!str) return null;
+        if (/^\d{4}-\d{2}-\d{2}/.test(str)) { const d = new Date(str); return isNaN(d.getTime()) ? null : d; }
+        const sp = str.match(/^(\d{1,2})\/([A-Za-záéíóúü]+)\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?:\s*(AM|PM|am|pm))?)?/i);
+        if (sp) {
+            const day = parseInt(sp[1],10); const mk = sp[2].toLowerCase().slice(0,3);
+            const year = parseInt(sp[3],10); const mi = CHART_MONTH_MAP[mk];
+            if (mi === undefined) return null;
+            let h = sp[4] ? parseInt(sp[4],10) : 0; const min = sp[5] ? parseInt(sp[5],10) : 0;
+            const ap = sp[6] ? sp[6].toUpperCase() : '';
+            if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
+            const d = new Date(year, mi, day, h, min, 0); return isNaN(d.getTime()) ? null : d;
+        }
+        const nm = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (nm) { const d = new Date(parseInt(nm[3],10), parseInt(nm[2],10)-1, parseInt(nm[1],10)); return isNaN(d.getTime()) ? null : d; }
+        const fb = new Date(str); return isNaN(fb.getTime()) ? null : fb;
+    };
+
+    // Registros de 00:00–05:59 pertenecen al día anterior (turno noche 3T)
+    const adjustNightShift = (date) => {
+        if (!date) return null;
+        if (date.getHours() < 6) return new Date(date.getFullYear(), date.getMonth(), date.getDate()-1, date.getHours(), date.getMinutes(), 0);
+        return date;
+    };
+
+    // Última fecha registrada de la partida (aprobación o cualquier rechazo).
+    // Se usa para ordenar la tabla: lo más reciente arriba.
+    const getFechaRef = (r) => {
+        let max = 0;
+        const push = (v) => {
+            const d = parseDateish(clean(v));
+            if (d && d.getTime() > max) max = d.getTime();
+        };
+        if (isAprobada(r)) {
+            push(r.fecha_aprobacion);
+            push(r.calidad_fin);
+        }
+        for (let i = 1; i <= MAX_MOTIVOS; i++) push(r[`fecha_rechazo_${i}`]);
+        return max;
+    };
+
+    // Lunes de la semana de una fecha
+    const startOfWeek = (date) => {
+        const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const day = d.getDay(); const diff = day === 0 ? -6 : 1 - day;
+        d.setDate(d.getDate() + diff); return d;
+    };
+
+    // Número de semana ISO 8601 (misma lógica que iq_data.js)
+    const getISOWeek = (date) => {
+        const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+        const day = d.getUTCDay() || 7;
+        d.setUTCDate(d.getUTCDate() + 4 - day);
+        const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+        return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+    };
+
+    // Clave (timestamp ordenable) + etiqueta del período de una fecha
+    const periodOf = (date, mode) => {
+        if (mode === 'semanas') {
+            const s = startOfWeek(date);
+            return { key: s.getTime(), label: `Sem ${getISOWeek(s)}` };
+        }
+        const s = new Date(date.getFullYear(), date.getMonth(), 1);
+        return { key: s.getTime(), label: `${CHART_MONTH_LABELS[s.getMonth()]} ${String(s.getFullYear()).slice(2)}` };
+    };
+
+    // Genera N períodos consecutivos terminando en anchorDate (más antiguo primero)
+    const buildPeriods = (anchorDate, mode, n = 7) => {
+        const out = [];
+        let d = mode === 'semanas' ? startOfWeek(anchorDate) : new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+        for (let i = 0; i < n; i++) {
+            out.unshift(periodOf(d, mode));
+            d = mode === 'semanas'
+                ? new Date(d.getFullYear(), d.getMonth(), d.getDate() - 7)
+                : new Date(d.getFullYear(), d.getMonth() - 1, 1);
+        }
+        return out;
+    };
+
+    // Consolida las filas en partidas únicas con su ESTADO FINAL, igual que el
+    // Consolidado de Aprobaciones: aprobada si CUALQUIER fila trae tipo_aprobacion;
+    // rechazada si ninguna lo trae pero hay motivos. Así ambas pantallas cuentan igual.
+    const buildPartidasGrafica = (records) => {
+        const map = new Map(); // partidaId → acumulador
+        records.forEach(r => {
+            const id = `${clean(r.op_tela)}-${clean(r.partida)}`;
+            let p = map.get(id);
+            if (!p) { p = { cliente: '', aprobada: false, fechaAprob: null, fechaRech: null, eventos: 0 }; map.set(id, p); }
+            const cli = normalizeCliente(clean(r.cliente));
+            if (cli && !p.cliente) p.cliente = cli;
+            if (isAprobada(r)) {
+                p.aprobada = true;
+                const d = adjustNightShift(parseDateish(r.calidad_fin)) || adjustNightShift(parseDateish(r.fecha_aprobacion));
+                if (d && (!p.fechaAprob || d > p.fechaAprob)) p.fechaAprob = d;
+            }
+            for (let i = 1; i <= MAX_MOTIVOS; i++) {
+                if (!clean(r[`motivo_rechazo_${i}`])) continue;
+                p.eventos++;
+                const d = adjustNightShift(parseDateish(r[`fecha_rechazo_${i}`]));
+                if (d && (!p.fechaRech || d > p.fechaRech)) p.fechaRech = d;
+            }
+        });
+        return [...map.values()]
+            .map(p => ({
+                cliente: p.cliente || '(sin cliente)',
+                estado:  p.aprobada ? 'aprobada' : (p.eventos ? 'rechazada' : null),
+                // Aprobadas se ubican por su fecha de aprobación; rechazadas por su último rechazo
+                fecha:   p.aprobada ? (p.fechaAprob || p.fechaRech) : p.fechaRech,
+            }))
+            .filter(p => p.estado && p.fecha);
+    };
+
+    // Construye la serie por período para ChartTendencia (ver js/chart_tendencia.js)
+    const buildChartData = (partidas, mode, fCliente) => {
+        const items = fCliente ? partidas.filter(p => p.cliente === fCliente) : partidas;
+
+        let maxKey = null;
+        const conPeriodo = items.map(p => {
+            const period = periodOf(p.fecha, mode);
+            if (maxKey === null || period.key > maxKey) maxKey = period.key;
+            return { ...p, key: period.key };
+        });
+
+        const anchor = maxKey !== null ? new Date(maxKey) : new Date();
+        const periods = buildPeriods(anchor, mode, 12);
+        const idxByKey = new Map(periods.map((p, i) => [p.key, i]));
+
+        const aprobadas  = periods.map(() => 0);
+        const rechazadas = periods.map(() => 0);
+        const detalles   = periods.map(() => ({ aprobadas: new Map(), rechazadas: new Map() }));
+
+        conPeriodo.forEach(p => {
+            const i = idxByKey.get(p.key);
+            if (i === undefined) return;
+            const abbr = clienteAbbr(p.cliente);
+            const bolsa = p.estado === 'aprobada' ? 'aprobadas' : 'rechazadas';
+            if (p.estado === 'aprobada') aprobadas[i]++; else rechazadas[i]++;
+            detalles[i][bolsa].set(abbr, (detalles[i][bolsa].get(abbr) || 0) + 1);
+        });
+
+        // Recorta períodos vacíos al inicio (deja al menos 4 visibles)
+        while (periods.length > 4 && !aprobadas[0] && !rechazadas[0]) {
+            periods.shift(); aprobadas.shift(); rechazadas.shift(); detalles.shift();
+        }
+
+        const toSorted = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }));
+        return {
+            labels: periods.map(p => p.label),
+            aprobadas,
+            rechazadas,
+            detalles: detalles.map(d => ({ aprobadas: toSorted(d.aprobadas), rechazadas: toSorted(d.rechazadas) })),
+            hasData: aprobadas.some(v => v) || rechazadas.some(v => v),
+        };
+    };
+
+    // --- Tarjeta de aprobación (estilo Trazailidad OP) ---
+    const APROBACION_STYLE = {
+        tolerancia:   { bg: 'bg-amber-100',   text: 'text-amber-800',  border: 'border-amber-400' },
+        autorizacion: { bg: 'bg-blue-100',    text: 'text-blue-800',   border: 'border-blue-400'  },
+        default:      { bg: 'bg-[#d9ead3]',   text: 'text-[#3f7550]', border: 'border-[#3f7550]' },
+    };
+    const getAprobacionStyle = (tipo) => {
+        const t = tipo.toUpperCase();
+        if (t.includes('TOLERANCIA'))   return APROBACION_STYLE.tolerancia;
+        if (t.includes('AUTORIZACION')) return APROBACION_STYLE.autorizacion;
+        return APROBACION_STYLE.default;
+    };
+
+    const AprobacionCard = ({ r }) => {
+        const tipo = clean(r.tipo_aprobacion);
+        if (!tipo) return <span className="text-[#9ca3af] italic text-xs">—</span>;
+        const fecha      = clean(r.fecha_aprobacion) || clean(r.calidad_fin);
+        const quien      = clean(r.quien_aprobo);
+        const supervisor = clean(r.supervisor_aprobacion);
+        const turno      = clean(r.turno_aprobacion);
+        const st = getAprobacionStyle(tipo);
+        return (
+            <div className={`bg-white rounded-lg border-2 ${st.border} overflow-hidden shadow-sm`}>
+                <div className={`${st.bg} ${st.text} font-bold text-[13px] px-1.5 py-0.5 text-center border-b-2 ${st.border} uppercase tracking-wide`}>
+                    {tipo}
+                </div>
+                <div className="px-1.5 py-1">
+                    <div className="flex justify-between items-center gap-1.5 mb-1">
+                        <span className="text-[13px] text-black whitespace-nowrap">{fecha || '—'}</span>
+                        {quien && (
+                            <span className="bg-[#4f8f62] text-white font-bold px-1.5 py-px rounded text-[13px] uppercase whitespace-nowrap">{quien}</span>
+                        )}
+                    </div>
+                    <hr className="border-t border-[#e3ecd9] mb-1" />
+                    <div className="flex justify-between items-center gap-1.5">
+                        <span className="text-[13px] text-black uppercase truncate" title={supervisor}>{supervisor || '—'}</span>
+                        <span className="text-[13px] text-black whitespace-nowrap">{turno || ''}</span>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    // --- Iconos SVG ---
+    const Icon = ({ d, size = 18 }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {d}
+        </svg>
+    );
+    const IconSearch = () => <Icon d={<><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></>} />;
+    const IconRefresh = () => <Icon d={<><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /><path d="M3 21v-5h5" /></>} />;
+    const IconPrint = () => <Icon d={<><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></>} />;
+    const IconChart = () => <Icon d={<><path d="M3 3v18h18" /><rect x="7" y="12" width="3" height="6" /><rect x="12" y="8" width="3" height="10" /><rect x="17" y="5" width="3" height="13" /></>} />;
+
+    const STATUS_META = {
+        aprobada:   { label: 'Aprobada',      dot: '#16a34a', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+        rechazada:  { label: 'Rechazada',     dot: '#dc2626', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+        evaluacion: { label: 'En evaluación', dot: '#d39b36', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+    };
+
+    // --- Modal de tendencia: Aprobadas vs Rechazadas por período (js/chart_tendencia.js) ---
+    const ChartModal = ({ records, onClose }) => {
+        const [mode, setMode] = useState('meses'); // 'meses' | 'semanas'
+        const [fCli, setFCli] = useState('');      // '' = todos los clientes
+        const canvasRef = useRef(null);
+        const chartRef  = useRef(null);
+
+        const partidas  = useMemo(() => buildPartidasGrafica(records), [records]);
+        const clientes  = useMemo(() => [...new Set(partidas.map(p => p.cliente))].sort(), [partidas]);
+        const chartData = useMemo(() => buildChartData(partidas, mode, fCli), [partidas, mode, fCli]);
+
+        // Cerrar con tecla Escape
+        useEffect(() => {
+            const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+            window.addEventListener('keydown', onKey);
+            return () => window.removeEventListener('keydown', onKey);
+        }, [onClose]);
+
+        // Crear / recrear el gráfico al cambiar datos, modo o cliente
+        useEffect(() => {
+            if (!canvasRef.current || !window.Chart || !window.ChartTendencia) return;
+            if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
+            if (chartData.hasData) {
+                chartRef.current = window.ChartTendencia.render(canvasRef.current, chartData);
+            }
+            return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; } };
+        }, [chartData]);
+
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:hidden" onClick={onClose}>
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-[1100px] max-h-[90vh] flex flex-col overflow-hidden"
+                    onClick={e => e.stopPropagation()}>
+                    {/* Encabezado */}
+                    <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-[#c8d8bd] bg-[#dfeccd]">
+                        <h2 className="text-base font-extrabold text-[#3f7550]">Aprobaciones y rechazos por período</h2>
+                        <div className="flex items-center gap-2">
+                            <select value={fCli} onChange={e => setFCli(e.target.value)}
+                                title="Ver la tendencia de un solo cliente"
+                                className="px-2 py-1 text-xs font-bold border border-[#4f8f62] rounded-md bg-white text-[#3f7550] outline-none focus:ring-2 focus:ring-[#4f8f62]/20 max-w-[180px]">
+                                <option value="">Todos los clientes</option>
+                                {clientes.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <div className="flex rounded-md overflow-hidden border border-[#4f8f62]">
+                                <button onClick={() => setMode('meses')}
+                                    className={`px-3 py-1 text-xs font-bold transition-colors ${mode==='meses' ? 'bg-[#4f8f62] text-white' : 'bg-white text-[#3f7550] hover:bg-[#eef5e8]'}`}>
+                                    Meses
+                                </button>
+                                <button onClick={() => setMode('semanas')}
+                                    className={`px-3 py-1 text-xs font-bold transition-colors ${mode==='semanas' ? 'bg-[#4f8f62] text-white' : 'bg-white text-[#3f7550] hover:bg-[#eef5e8]'}`}>
+                                    Semanas
+                                </button>
+                            </div>
+                            <button onClick={onClose} title="Cerrar"
+                                className="flex items-center justify-center w-8 h-8 rounded-md bg-white border border-[#c8d8bd] hover:bg-rose-50 text-[#3f7550] text-lg">✕</button>
+                        </div>
+                    </div>
+                    {/* Cuerpo */}
+                    <div className="p-5 flex-1 overflow-auto">
+                        <p className="text-[12px] text-[#667466] mb-1">
+                            El porcentaje sobre cada período es el <b>nivel de rechazo</b> (partidas rechazadas ÷ partidas auditadas).
+                            Pase el cursor sobre las barras para ver el detalle por cliente.
+                        </p>
+                        <div className="relative" style={{ height: '58vh', minHeight: '360px' }}>
+                            <canvas ref={canvasRef}></canvas>
+                            {!chartData.hasData && (
+                                <div className="absolute inset-0 flex items-center justify-center text-[#667466]">
+                                    No hay datos para graficar.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    function App() {
+        const [records, setRecords] = useState([]);
+        const [loading, setLoading]  = useState(true);
+        const [error, setError]      = useState('');
+
+        const [search, setSearch]           = useState('');
+        const [fCliente, setFCliente]       = useState('');
+        const [fTipoTela, setFTipoTela]     = useState('');
+        // '' = todas (aprobadas y rechazadas); las "en evaluación" ya no se listan
+        const [fEstado, setFEstado]         = useState('');
+        const [fMotivo, setFMotivo]         = useState('');
+        const [showChart, setShowChart]     = useState(false);
+
+        const loadData = async (force = false) => {
+            setLoading(true);
+            setError('');
+            // Mostrar al instante lo cacheado, luego refrescar desde el servidor.
+            if (!force) {
+                try {
+                    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+                    if (raw) {
+                        const parsed = JSON.parse(raw);
+                        if (Array.isArray(parsed) && parsed.length) setRecords(parsed);
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            try {
+                // gviz primero, Apps Script como respaldo (ver data_api.js).
+                const recs = await window.DataAPI.loadTintoreriaRecords();
+                setRecords(recs);
+                try { localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(recs)); } catch (e) { /* quota */ }
+            } catch (e) {
+                console.error('[trazabilidad_op] Error cargando datos:', e);
+                if (records.length === 0) setError('No se pudieron cargar los datos. Verifique su conexión y vuelva a intentar.');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        useEffect(() => { loadData(false); }, []);
+
+        // ── Filtros en cascada ──────────────────────────────────────────────
+        // Cada desplegable ofrece solo valores con datos bajo los DEMÁS filtros
+        // activos (p. ej. con Motivo=QUEBRADURAS, Cliente solo lista clientes
+        // con partidas de ese motivo). Si un valor seleccionado se queda sin
+        // datos (p. ej. tras refrescar), se conserva en la lista para poder
+        // verlo y quitarlo.
+        const passesBase   = (r) => isAprobada(r) || getMotivos(r).length > 0;
+        const passCliente  = (r) => !fCliente  || normalizeCliente(clean(r.cliente)) === fCliente;
+        const passTipoTela = (r) => !fTipoTela || clean(r.tipo_tela) === fTipoTela;
+        const passEstado   = (r) => !fEstado   || getEstado(r) === fEstado;
+        const passMotivo   = (r) => !fMotivo   || getMotivos(r).some(m => m.toUpperCase() === fMotivo.toUpperCase());
+
+        const clientes = useMemo(() => {
+            const set = new Set(records
+                .filter(r => passesBase(r) && passTipoTela(r) && passEstado(r) && passMotivo(r))
+                .map(r => normalizeCliente(clean(r.cliente)))
+                .filter(Boolean));
+            if (fCliente) set.add(fCliente);
+            return [...set].sort();
+        }, [records, fCliente, fTipoTela, fEstado, fMotivo]);
+
+        const tiposTela = useMemo(() => {
+            const set = new Set(records
+                .filter(r => passesBase(r) && passCliente(r) && passEstado(r) && passMotivo(r))
+                .map(r => clean(r.tipo_tela))
+                .filter(Boolean));
+            if (fTipoTela) set.add(fTipoTela);
+            return [...set].sort();
+        }, [records, fCliente, fTipoTela, fEstado, fMotivo]);
+
+        const estadosDisponibles = useMemo(() => {
+            const set = new Set(records
+                .filter(r => passesBase(r) && passCliente(r) && passTipoTela(r) && passMotivo(r))
+                .map(getEstado));
+            if (fEstado) set.add(fEstado);
+            return set;
+        }, [records, fCliente, fTipoTela, fEstado, fMotivo]);
+
+        const motivosDisponibles = useMemo(() => {
+            const presentes = new Set();
+            records
+                .filter(r => passesBase(r) && passCliente(r) && passTipoTela(r) && passEstado(r))
+                .forEach(r => getMotivos(r).forEach(m => presentes.add(m.toUpperCase())));
+            const lista = MOTIVOS_CATALOGO.filter(m => presentes.has(m.toUpperCase()));
+            if (fMotivo && !lista.some(m => m.toUpperCase() === fMotivo.toUpperCase())) lista.push(fMotivo);
+            return lista;
+        }, [records, fCliente, fTipoTela, fEstado, fMotivo]);
+
+        const filtered = useMemo(() => {
+            const q = search.trim().toLowerCase();
+            return records.filter(r => {
+                // Solo partidas con datos en Motivos de Rechazo o Tipo Aprobación;
+                // las "en evaluación" (sin ninguno de los dos) no se muestran.
+                if (!passesBase(r)) return false;
+                if (!passCliente(r) || !passTipoTela(r) || !passEstado(r) || !passMotivo(r)) return false;
+                if (!q) return true;
+
+                // Búsqueda "OP-Partida" estricta cuando hay guion
+                if (q.includes('-')) {
+                    const [op, ptda] = q.split('-').map(s => s.trim());
+                    return clean(r.op_tela).toLowerCase().includes(op) &&
+                           clean(r.partida).toLowerCase().includes(ptda);
+                }
+                const haystack = [
+                    r.op_tela, r.partida, r.color, r.cliente, r.cod_art, r.articulo,
+                    r.tipo_aprobacion, r.supervisor_aprobacion,
+                    ...getMotivos(r)
+                ].map(clean).join(' ').toLowerCase();
+                return haystack.includes(q);
+            });
+        }, [records, search, fCliente, fTipoTela, fEstado, fMotivo]);
+
+        // Orden de la tabla: lo más reciente arriba, según la última fecha de
+        // aprobación o rechazo registrada. Empates conservan el orden de la hoja.
+        const sorted = useMemo(() => {
+            return filtered
+                .map((r, i) => ({ r, i, t: getFechaRef(r) }))
+                .sort((a, b) => (b.t - a.t) || (a.i - b.i))
+                .map(x => x.r);
+        }, [filtered]);
+
+        // Pintado tipo "zebra" agrupado por OP-Partida: las filas con la misma
+        // OP-Partida comparten color y el tono solo cambia al cambiar de OP-Partida.
+        const rowShade = useMemo(() => {
+            let g = 0;
+            let prev = null;
+            return sorted.map(r => {
+                const key = `${clean(r.op_tela)}-${clean(r.partida)}`;
+                if (prev !== null && key !== prev) g++;
+                prev = key;
+                return g % 2;
+            });
+        }, [sorted]);
+
+        const homeHref = window.AppRouter.href('home');
+
+        return (
+            <div className="traz-op-root min-h-screen bg-[#f4f7ef] text-black" style={{ fontFamily: 'Arial, sans-serif' }}>
+                {/* ───────── ENCABEZADO + CONTROLES (no se imprime) ───────── */}
+                <div className="print:hidden bg-white border-b border-[#c8d8bd] shadow-sm">
+                    <div className="max-w-[1500px] mx-auto px-5 py-3 flex items-center gap-3">
+
+                        {/* Icono + Título — ocupa el espacio sobrante */}
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <div className="bg-[#4f8f62] text-white w-9 h-9 rounded-lg flex items-center justify-center shadow shrink-0">
+                                <Icon size={20} d={<><path d="M3 3v18h18" /><rect x="7" y="13" width="3" height="5" /><rect x="12" y="9" width="3" height="9" /><rect x="17" y="6" width="3" height="12" /></>} />
+                            </div>
+                            <h1 className="text-base text-[#3f7550] truncate">Trazabilidad OP-Partida T-ACABADA</h1>
+                        </div>
+
+                        {/* Filtros + Botones — pegados a la derecha */}
+                        <div className="flex items-center gap-2 shrink-0">
+                            {/* Buscar */}
+                            <div className="relative w-[180px]">
+                                <div className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[#4f8f62] pointer-events-none"><IconSearch /></div>
+                                <input type="text" value={search} onChange={e => { setSearch(e.target.value); if (e.target.value) setFEstado(''); }}
+                                    placeholder="OP / cliente…"
+                                    title="Buscar por OP-Partida / cliente / color / artículo / motivo"
+                                    className="w-full pl-8 pr-2 py-1.5 text-xs border border-[#c8d8bd] rounded-md bg-white outline-none focus:border-[#4f8f62] focus:ring-2 focus:ring-[#4f8f62]/20" />
+                            </div>
+                            {/* Cliente */}
+                            <select value={fCliente} onChange={e => setFCliente(e.target.value)}
+                                title="Filtrar por cliente"
+                                className="px-2 py-1.5 text-xs border border-[#c8d8bd] rounded-md bg-white outline-none focus:border-[#4f8f62] w-[110px]">
+                                <option value="">Cliente</option>
+                                {clientes.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            {/* Tipo tela */}
+                            <select value={fTipoTela} onChange={e => setFTipoTela(e.target.value)}
+                                title="Filtrar por tipo de tela"
+                                className="px-2 py-1.5 text-xs border border-[#c8d8bd] rounded-md bg-white outline-none focus:border-[#4f8f62] w-[150px]">
+                                <option value="">Tipo tela</option>
+                                {tiposTela.map(t => <option key={t} value={t}>{tipoTelaDisplay(t)}</option>)}
+                            </select>
+                            {/* Estado */}
+                            <select value={fEstado} onChange={e => setFEstado(e.target.value)}
+                                title="Filtrar por estado"
+                                className="px-2 py-1.5 text-xs border border-[#c8d8bd] rounded-md bg-white outline-none focus:border-[#4f8f62] w-[110px]">
+                                <option value="">Estado</option>
+                                {estadosDisponibles.has('aprobada') && <option value="aprobada">Aprobadas</option>}
+                                {estadosDisponibles.has('rechazada') && <option value="rechazada">Rechazadas</option>}
+                            </select>
+                            {/* Motivo de rechazo: coincide con cualquier motivo_rechazo_1..7 de la partida */}
+                            <select value={fMotivo} onChange={e => setFMotivo(e.target.value)}
+                                title="Filtrar por motivo de rechazo (busca en todos los motivos de la partida)"
+                                className="px-2 py-1.5 text-xs border border-[#c8d8bd] rounded-md bg-white outline-none focus:border-[#4f8f62] w-[150px]">
+                                <option value="">Motivo rechazo</option>
+                                {motivosDisponibles.map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                            {/* Separador */}
+                            <div className="w-px h-6 bg-[#c8d8bd]"></div>
+                            {/* Botones */}
+                            <button onClick={() => loadData(true)} disabled={loading}
+                                className="flex items-center justify-center bg-[#4f8f62] hover:bg-[#3f7550] disabled:opacity-50 text-white w-9 h-9 rounded-md transition-colors shadow-sm">
+                                <IconRefresh />
+                            </button>
+                            <button onClick={() => setShowChart(true)} title="Ver gráfica"
+                                className="flex items-center justify-center bg-white border border-[#c8d8bd] hover:bg-[#eef5e8] text-[#3f7550] w-9 h-9 rounded-md transition-colors shadow-sm">
+                                <IconChart />
+                            </button>
+                            <button onClick={() => window.print()} disabled={filtered.length === 0}
+                                className="flex items-center justify-center bg-white border border-[#c8d8bd] hover:bg-[#eef5e8] disabled:opacity-50 text-[#3f7550] w-9 h-9 rounded-md transition-colors shadow-sm">
+                                <IconPrint />
+                            </button>
+                            <a href={homeHref} title="Volver al menú"
+                                className="flex items-center justify-center w-9 h-9 bg-[#3f7550] hover:bg-[#2f5a3c] text-white rounded-md text-lg no-underline transition-colors shadow-sm">←</a>
+                        </div>
+                    </div>
+                </div>
+
+                {/* ───────── GRILLA ───────── */}
+                <div className="traz-op-wrap max-w-[1500px] mx-auto px-5 py-3">
+                    <div className="traz-op-card bg-white rounded-xl border border-[#c8d8bd] shadow-sm overflow-hidden">
+                        <div className="traz-op-scroll overflow-x-hidden overflow-y-auto" style={{ height: 'calc(100vh - 90px)' }}>
+                            <table className="w-full table-fixed border-collapse" style={{ fontFamily: "'Calibri', 'Arial Narrow', Arial, sans-serif", fontSize: '13px', fontWeight: 'normal' }}>
+                                <colgroup>
+                                    <col style={{ width: '3.5%' }} />
+                                    <col style={{ width: '5%' }} />
+                                    <col style={{ width: '6%' }} />
+                                    <col style={{ width: '3%' }} />
+                                    <col style={{ width: '7.5%' }} />
+                                    <col style={{ width: '24%' }} />
+                                    <col style={{ width: '14%' }} />
+                                    <col style={{ width: '9%' }} />
+                                </colgroup>
+                                <thead className="sticky top-0 z-10">
+                                    <tr className="bg-[#dfeccd] text-[#3f7550] text-[13px] uppercase tracking-wide">
+                                        <th className="px-3 py-2.5 text-center border border-[#4a4a4a]">Cliente</th>
+                                        <th className="px-3 py-2.5 text-center border border-[#4a4a4a]">OP-Ptda</th>
+                                        <th className="px-3 py-2.5 text-center border border-[#4a4a4a]">Color</th>
+                                        <th className="px-3 py-2.5 text-center border border-[#4a4a4a]">KG</th>
+                                        <th className="px-3 py-2.5 text-center border border-[#4a4a4a]">Cód. Art. / Artículo</th>
+                                        <th className="px-3 py-2.5 text-center border border-[#4a4a4a]">Motivos de Rechazo</th>
+                                        <th className="px-3 py-2.5 text-center border border-[#4a4a4a]">Tipo Aprobación</th>
+                                        <th className="px-3 py-2.5 text-center border border-[#4a4a4a]">Observación</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {loading && records.length === 0 ? (
+                                        <tr><td colSpan="8" className="px-6 py-16 text-center text-[#667466]">Cargando registros…</td></tr>
+                                    ) : error ? (
+                                        <tr><td colSpan="8" className="px-6 py-16 text-center text-rose-600 font-semibold">{error}</td></tr>
+                                    ) : sorted.length === 0 ? (
+                                        <tr><td colSpan="8" className="px-6 py-16 text-center text-[#667466]">Sin coincidencias. Ajuste la búsqueda o los filtros.</td></tr>
+                                    ) : sorted.map((r, i) => {
+                                        const motivos = getMotivos(r);
+                                        const estado = getEstado(r);
+                                        const meta = STATUS_META[estado];
+                                        const [codPrefix, codTail] = splitCodArt(r.cod_art);
+                                        return (
+                                            <tr key={`${clean(r.op_tela)}-${clean(r.partida)}-${i}`}
+                                                className={`align-top hover:bg-[#eef5e8] transition-colors ${rowShade[i] ? 'bg-[#f9fbf5]' : 'bg-white'}`}>
+                                                {/* Cliente */}
+                                                <td className="px-3 py-2.5 border border-[#4a4a4a]">
+                                                    <span className="block text-[13px] text-black leading-snug" title={clean(r.cliente)}>
+                                                        {clienteAbbr(r.cliente) || '—'}
+                                                    </span>
+                                                </td>
+                                                {/* OP-Partida */}
+                                                <td className="px-3 py-2.5 border border-[#4a4a4a]">
+                                                    <span className="block text-[13px] text-black leading-snug line-clamp-2 break-words font-bold">
+                                                        {clean(r.op_tela) || '—'}-{clean(r.partida) || '—'}
+                                                    </span>
+                                                </td>
+                                                {/* Color */}
+                                                <td className="px-3 py-2.5 border border-[#4a4a4a]">
+                                                    <span className="block text-[13px] text-black leading-snug line-clamp-2 break-words" title={clean(r.color)}>
+                                                        {clean(r.color) || '—'}
+                                                    </span>
+                                                </td>
+                                                {/* Peso */}
+                                                <td className="px-3 py-2.5 text-right tabular-nums text-[13px] text-black border border-[#4a4a4a]">
+                                                    {clean(r.peso_kg_crudo) || '—'}
+                                                </td>
+                                                {/* Cod Art / Articulo */}
+                                                <td className="px-3 py-2.5 border border-[#4a4a4a]">
+                                                    <span className="block text-[13px] text-black leading-tight">
+                                                        {codPrefix}<span className="text-rose-600 font-bold">{codTail || '—'}</span>
+                                                    </span>
+                                                    <span className="block text-[13px] text-[#667466] uppercase leading-snug line-clamp-2 break-words" title={clean(r.articulo)}>
+                                                        {clean(r.articulo) || 'Artículo sin especificar'}
+                                                    </span>
+                                                </td>
+                                                {/* Rechazo */}
+                                                <td className="px-3 py-2.5 align-top border border-[#4a4a4a]">
+                                                    {(() => {
+                                                        const rechazos = getRechazosFull(r);
+                                                        if (rechazos.length === 0) return (
+                                                            <span className="text-[#9ca3af] italic text-xs">Sin rechazos</span>
+                                                        );
+                                                        return (
+                                                            <div className="rounded-lg border border-[#c8d8bd] overflow-hidden shadow-sm">
+                                                                {rechazos.map((rec, k) => (
+                                                                    <div key={k}
+                                                                        className={`grid items-center gap-x-2 px-2 py-1.5 ${k > 0 ? 'border-t border-[#e3ecd9]' : ''} ${k % 2 === 0 ? 'bg-white' : 'bg-[#f9fbf5]'}`}
+                                                                        style={{ gridTemplateColumns: '30px 142px auto 1fr' }}>
+                                                                        <span className="text-[13px] text-[#3f7550] uppercase">{rec.label}</span>
+                                                                        <span className="text-[13px] text-black">{rec.fecha || '—'}</span>
+                                                                        <span className="bg-yellow-300 text-slate-900 font-bold px-2 py-0.5 rounded border border-yellow-400 text-[13px] uppercase whitespace-nowrap">{rec.motivo}</span>
+                                                                        <span className="text-[13px] text-black uppercase truncate text-right" title={`${rec.supervisor}${rec.turno ? ` - ${rec.turno}` : ''}`}>
+                                                                            {rec.supervisor || '—'}{rec.turno ? ` - ${rec.turno}` : ''}
+                                                                        </span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </td>
+                                                {/* Tipo Aprobación — tarjeta */}
+                                                <td className="px-3 py-2.5 align-top border border-[#4a4a4a]">
+                                                    <AprobacionCard r={r} />
+                                                </td>
+                                                {/* Observación Calidad */}
+                                                <td className="px-3 py-2.5 align-top border border-[#4a4a4a]">
+                                                    <span className="block text-[13px] text-black leading-snug break-words">
+                                                        {clean(r.observacion_calidad) || ''}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                {showChart && <ChartModal records={records} onClose={() => setShowChart(false)} />}
+            </div>
+        );
+    }
+
+    const root = document.getElementById('root');
+    if (root) {
+        ReactDOM.createRoot(root).render(<App />);
+    }
+})();
